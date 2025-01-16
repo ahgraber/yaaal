@@ -1,0 +1,136 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling" ]
+
+[project]
+name = "yaaal"
+# version = "0.beta"
+description = "Yet Another AI Agent Library"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "aisuite[all]>=0.1.7",
+  "anthropic>=0.30.1",
+  "asyncio>=3.4.3",
+  "chardet>=5.2",
+  "json-repair>=0.35",
+  "openai>=1.59.2",
+  "pydantic>=2.10.4",
+  "pydantic-ai>=0.0.5",
+  "pydantic-settings>=2.7.1",
+  "python-dotenv>=1.0.1",
+  "reflex>=0.6.7",
+  "requests>=2.32.3",
+  "tenacity>=9",
+  "tiktoken>=0.8",
+]
+
+[dependency-groups]
+dev = [
+  "ipykernel>=6.29.5",
+  "ipywidgets>=8.1.5",
+  "nest-asyncio>=1.6",
+  "notebook>=7.2.2",
+]
+test = [
+  "coverage>=7.6.9",
+  "pytest>=8.3.4",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6",
+  "pytest-playwright>=0.6.2",
+  "pytest-responses>=0.5.1",
+  "responses>=0.25.3",
+]
+ds = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+]
+plot = [
+  "cmcrameri>=1.9",
+  "matplotlib>=3.8",
+  "mizani>=0.13",
+  "plotly>=5.24",
+  "plotnine>=0.14",
+  "seaborn>=0.13",
+]
+
+[tool.hatch.version]
+path = "./src/VERSION"
+pattern = "^(?P<version>.+?)(\n)"
+
+[tool.hatch.build]
+only-include = [ "./src/VERSION", "src/yaaal", "tests" ]
+skip-excluded-dirs = true
+sources = [ "src" ]
+
+[tool.hatch.build.targets.sdist]
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/yaaal" ]
+macos-max-compat = true
+
+[tool.pytest.ini_options]
+addopts = '''
+    -ra
+    --strict-markers
+    --ignore=docs/conf.py
+    --ignore=setup.py
+    --ignore=ci
+    --ignore=.eggs
+    --import-mode=importlib
+    --tb=short
+'''
+# --doctest-modules
+# --doctest-glob=\*.rst
+norecursedirs = [
+  ".env",
+  ".git",
+  ".nox",
+  ".pytest_cache",
+  ".tox",
+  "__pycache__",
+  "dist",
+  "docs",
+  "build",
+  "migrations",
+  "notebooks",
+  "writeup",
+]
+python_files = [ "test_*.py", "*_test.py", "tests.py" ]
+pythonpath = "src"
+testpaths = [ "tests" ]
+# log_cli = true
+
+[tool.coverage.paths]
+source = [ "src", "*/site-packages" ]
+
+[tool.coverage.run]
+branch = true
+source = [ "src" ]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.uv]
+package = true
+default-groups = [ "dev", "ds", "plot", "test" ]
+python-preference = "managed"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.pip]
+prerelease = "if-necessary-or-explicit"
+
+[tool.uv.sources]
+yaaal = { path = "src/yaaal", editable = true }
