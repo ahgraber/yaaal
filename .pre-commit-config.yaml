@@ -3,7 +3,6 @@
 # See https://pre-commit.com/hooks.html for more hooks
 exclude: |
   (?x)^(
-    ^.*(copier-answers\.ya?ml)$
     ^.*(package-lock\.json)$
     ^.*(uv\.lock)$
   )$
@@ -20,11 +19,6 @@ repos:
           (?x)^(
             ^.*(copier-answers\.ya?ml)$
           )$
-      - id: forbid-rej
-        name: Forbid .rej file extensions from `copier update`
-        entry: Forbid .rej file extensions from `copier update`
-        language: fail
-        files: \.rej$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v5.0.0"
     hooks:
@@ -65,30 +59,9 @@ repos:
       - id: fix-ligatures
         stages: [commit]
   - repo: https://github.com/zricethezav/gitleaks
-    rev: "v8.21.2"
+    rev: "v8.23.1"
     hooks:
       - id: gitleaks
-  # - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
-  #   rev: "3.0.3"
-  #   hooks:
-  #     - id: editorconfig-checker
-  #       name: Check editorconfig compliance
-  #       exclude: |
-  #         (?x)^(
-  #           # these file types may have nonstandard indents
-  #           ^(LICENSE)$ |
-  #           ^.*(\.md)$ |
-  #           ^.*(\.rst)$
-  #         )$
-  #       stages: [commit]
-  - repo: local
-    hooks:
-      - id: hadolint
-        name: Lint Dockerfiles
-        language: system
-        entry: hadolint
-        types: ["dockerfile"]
-        stages: [commit]
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: "v0.43.0"
     hooks:
@@ -98,31 +71,41 @@ repos:
           - --config=.markdownlint.yaml
           - --fix
         stages: [commit]
-  - repo: local
-    hooks:
-      - id: prettier
-        name: Format with Prettier
-        language: system
-        entry: prettier
-        args:
-          - --write
-          - --ignore-unknown
-          - --no-error-on-unmatched-pattern
-          # - "--ignore-path '**/*.md'"
-          # - "--ignore-path '**/*.y*ml'"
-        stages: [commit]
+  # ### NOTE: Prettier broke plugins:
+  #           https://github.com/pre-commit/mirrors-prettier/blob/main/README.md
+  # - repo: local
+  #   hooks:
+  #     - id: prettier
+  #       name: Format with Prettier
+  #       language: system
+  #       entry: prettier
+  #       args:
+  #         - --write
+  #         - --ignore-unknown
+  #         - --no-error-on-unmatched-pattern
+  #         # - "--ignore-path '**/*.md'"
+  #         # - "--ignore-path '**/*.y*ml'"
+  #       stages: [commit]
   - repo: https://github.com/tox-dev/pyproject-fmt
     rev: "v2.5.0"
     hooks:
       - id: pyproject-fmt
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: "v0.8.2"
+    rev: "v0.9.2"
     hooks:
       - id: ruff
         name: Lint and Format with Ruff
-        args: [--fix]
+        args:
+          - --fix
+          - --config=.ruff.toml
         stages: [commit]
-  - repo: local
+  - repo: https://github.com/kynan/nbstripout
+    rev: "0.8.1"
+    hooks:
+      - id: nbstripout
+        stages: [commit]
+  - repo: https://github.com/koalaman/shellcheck-precommit # local
+    rev: "v0.10.0"
     hooks:
       - id: shellcheck
         name: Lint shell scripts
@@ -146,7 +129,7 @@ repos:
   ### in order for typos pre-commit hook to read it.
   ### In this case, comment out this block until ".typos.toml" has been committed successfully
   - repo: https://github.com/crate-ci/typos
-    rev: "v1.28.2"
+    rev: "v1.29.4"
     hooks:
       - id: typos
         name: Spellcheck with Typos

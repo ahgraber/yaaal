@@ -79,13 +79,11 @@ data/
 *.bak
 *.log
 *.zip
+.archive/
 .logs/
 .task/
 .temp*
 TODO.md
-chromium-profile
-chrome-profile
-
 
 # retain files
 !.gitkeep
