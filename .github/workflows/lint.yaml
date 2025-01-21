@@ -1,0 +1,41 @@
+---
+name: Lint
+
+on: # yamllint disable-line rule:truthy
+  pull_request:  # run when PR opened
+  push:
+    branches-ignore:  # don't run once PR into main approved
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: Run pre-commit hooks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo 🛒
+        uses: actions/checkout@v4
+
+      - name: Install the latest version of uv and set the python version
+        uses: astral-sh/setup-uv@v5
+
+      - name: Lint .py with Ruff
+        run: uv tool run ruff check --config=.ruff.toml
+
+      - name: Format .py with Ruff
+        run: uv tool run ruff format --check --config=.ruff.toml
+
+      - name: Lint .md with markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          config: ./.markdownlint.yaml
+          globs: '**/*.md'
+
+      - name: spellcheck
+        uses: crate-ci/typos@v1.29.4
+        with:
+          config: ./.typos.toml
