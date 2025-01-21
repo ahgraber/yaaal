@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import wraps
 import inspect
 import logging
-from typing import Annotated, Any, TypeAliasType, Union
+from typing import Annotated, Any, Union
 
 from pydantic import (
     BaseModel,
@@ -14,6 +14,7 @@ from pydantic import (
     WrapValidator,
 )
 from pydantic_core import PydanticCustomError
+from typing_extensions import TypeAliasType  # TODO: import from typing when drop support for 3.11
 
 logger = logging.getLogger(__name__)
 
