@@ -23,10 +23,11 @@ Prompts provide a 'signature' method to mock a function signature that details a
 from abc import abstractmethod
 import logging
 from string import Template as StringTemplate
-from typing import Annotated, Any, Type, override
+from typing import Annotated, Any, Type
 
 from jinja2 import StrictUndefined, Template as JinjaTemplate
 from pydantic import BaseModel, BeforeValidator, Field, create_model
+from typing_extensions import override  # TODO: import from typing when drop support for 3.11
 
 from ._types import JSON, Conversation, Message
 from ..utilities import to_snake_case
