@@ -94,9 +94,14 @@ repos:
     rev: "v0.9.2"
     hooks:
       - id: ruff
-        name: Lint and Format with Ruff
+        name: Lint with Ruff
         args:
           - --fix
+          - --config=.ruff.toml
+        stages: [commit]
+      - id: ruff-format
+        name: Format with Ruff
+        args:
           - --config=.ruff.toml
         stages: [commit]
   - repo: https://github.com/kynan/nbstripout
