@@ -5,14 +5,21 @@ import logging
 import os
 from typing import Annotated, Any, Callable
 
-from pydantic import create_model
+from pydantic import BaseModel, Field, create_model
 
 import requests
 
-from ..core._types import URLContent
 from ..core.tools import tool
 
 logger = logging.getLogger(__name__)
+
+
+class URLContent(BaseModel, extra="ignore"):
+    """Text content from a webpage."""
+
+    url: str = Field(description="The webpage url")
+    title: str = Field(description="The page title")
+    content: str = Field(description="The webpage's text content")
 
 
 @tool

@@ -5,8 +5,8 @@ from ..core import (
     PassthroughMessageTemplate,
     Prompt,
     StringMessageTemplate,
-    URLContent,
 )
+from ..tools.web import URLContent
 
 
 class BaseContext(BaseModel):
@@ -95,9 +95,5 @@ ExtractorPrompt = Prompt(
         template=extractor_prompt_template,
         template_vars_model=ExtractorSystemVars,
     ),
-    user_template=StringMessageTemplate(
-        role="user",
-        template="$guidance",
-        template_vars_model=ExtractorUserVars,
-    ),
+    user_template=PassthroughMessageTemplate(),
 )

@@ -5,8 +5,8 @@ from ..core import (
     PassthroughMessageTemplate,
     Prompt,
     StringMessageTemplate,
-    URLContent,
 )
+from ..tools.web import URLContent
 
 
 class Summary(BaseModel, extra="ignore"):
@@ -58,9 +58,5 @@ SummarizerPrompt = Prompt(
         template=summarizer_prompt_template,
         template_vars_model=SummarizerSystemVars,
     ),
-    user_template=StringMessageTemplate(
-        role="user",
-        template="$guidance",
-        template_vars_model=SummarizerUserVars,
-    ),
+    user_template=PassthroughMessageTemplate(),
 )

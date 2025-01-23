@@ -7,8 +7,8 @@ from ..core import (
     PassthroughMessageTemplate,
     Prompt,
     StringMessageTemplate,
-    URLContent,
 )
+from ..tools.web import URLContent
 
 MemoWriter_prompt_template = """
 You are a professional ghostwriter. Your task is to review this information and draft an informative and engaging memo based on the provided sources that summarizes the key insights and takeaways. The user may provide additional guidance to help you complete the task.
@@ -38,10 +38,10 @@ Follow these instructions carefully:
 ## Key Takeaways
 
 1. [Insert key takeaway 1]
-   (Relevant citations)
+   (Citations)
 
 2. [Insert key takeaway 2]
-   (Relevant citations)
+   (Citations)
 
 ...[Continue for all key takeaways]
 
@@ -76,9 +76,5 @@ MemoWriterPrompt = Prompt(
         template=MemoWriter_prompt_template,
         template_vars_model=MemoWriterSystemVars,
     ),
-    user_template=StringMessageTemplate(
-        role="user",
-        template="$guidance",
-        template_vars_model=MemoWriterUserVars,
-    ),
+    user_template=PassthroughMessageTemplate(),
 )
