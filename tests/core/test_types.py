@@ -25,7 +25,7 @@ class TestMessage:
         assert "extra inputs are not permitted" in str(exc_info.value).lower()
 
     def test_valid_role_values(self):
-        roles = ["system", "user", "assistant", "function"]
+        roles = ["system", "user", "assistant", "tool"]
         for role in roles:
             message = Message(role=role, content="test content")
             assert message.role == role

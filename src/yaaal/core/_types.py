@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from functools import wraps
-import inspect
 import logging
-from typing import Annotated, Any, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import (
     BaseModel,
@@ -46,23 +44,46 @@ JSON = TypeAliasType(
 
 
 class Message(BaseModel, extra="forbid"):
-    role: str = Field(description="The role of the message author.", min_length=1)
+    role: Literal["assistant", "system", "tool", "user"] = Field(
+        description="The role of the message author.", min_length=1
+    )
     content: str = Field(description="The contents of the message.", min_length=1)
 
 
 class ToolMessage(Message):
-    role: str = "tool"
-    tool_call_id: str = Field(description="The tool_call.id that requested this response")
+    role: Literal["tool"] = "tool"
     content: str = Field(description="The result of the tool call.")
+    tool_call_id: str = Field(description="The tool_call.id that requested this response")
 
 
 class Conversation(BaseModel, extra="forbid"):
     messages: list[Message] = Field(description="The messages of the conversation.", min_length=1)
 
 
-class URLContent(BaseModel, extra="ignore"):
-    """Text content from a webpage."""
+# ------------------------------------------------------------------
+# OpenAI compatibility
+class ChatCompletionResponse(BaseModel):
+    choices: list[ChatCompletionChoice]
 
-    url: str = Field(description="The webpage url")
-    title: str = Field(description="The page title")
-    content: str = Field(description="The webpage's text content")
+
+class ChatCompletionChoice(BaseModel):
+    finish_reason: Literal["stop", "tool_calls"] | None = None
+    message: ChatCompletionMessage
+
+
+class ChatCompletionMessage(Message):
+    # role: Literal["assistant", "system", "tool", "user"]
+    content: str | None
+    tool_calls: list[ChatCompletionMessageToolCall] | None
+    refusal: str | None
+
+
+class ChatCompletionMessageToolCall(BaseModel):
+    id: str
+    function: ChatCompletionToolCallFunction
+    type: Literal["function"] = "function"
+
+
+class ChatCompletionToolCallFunction(BaseModel):
+    name: str
+    arguments: str
