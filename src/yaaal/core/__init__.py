@@ -1,4 +1,4 @@
-from ._types import JSON, Conversation, Message, URLContent
+from ._types import JSON, Conversation, Message
 from .caller import Caller, PydanticResponseValidatorMixin, RegexResponseValidatorMixin
 from .prompt import (
     JinjaMessageTemplate,
@@ -10,7 +10,7 @@ from .prompt import (
 )
 from .tools import tool
 
-types_ = ["JSON", "Conversation", "Message", "URLContent"]
+types_ = ["JSON", "Conversation", "Message"]
 caller_ = ["Caller", "PydanticResponseValidatorMixin", "RegexResponseValidatorMixin"]
 prompt_ = [
     "JinjaMessageTemplate",
