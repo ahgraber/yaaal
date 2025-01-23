@@ -111,7 +111,7 @@ Each component--Message, Conversation, MessageTemplate, Prompt, Caller, Agent --
 
 ### 4.4 Dependencies and Compatibility
 
-**Core Dependencies**: `yaaal` has minimal dependencies but assumes Pydantic>=2.10 and optionally uses OpenTelemetry for tracing.
+**Core Dependencies**: `yaaal` has minimal dependencies but assumes `aisuite` and `pydantic>=2.10` and optionally uses OpenTelemetry for tracing.
 
 **Compatibility**: Works in any standard Python environment (>=3.11) and can be easily integrated with other tools and services. We generally assume we are building for OpenAI API compatibility.
 
