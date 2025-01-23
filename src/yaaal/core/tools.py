@@ -7,9 +7,7 @@ from typing import Annotated, Any, Callable, Type
 
 from pydantic import BaseModel, create_model
 
-import requests
-
-from ._types import JSON, ToolMessage, URLContent
+from ._types import JSON, ToolMessage
 
 logger = logging.getLogger(__name__)
 
