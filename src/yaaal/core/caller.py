@@ -22,10 +22,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import logging
-from typing import Generic, Match, Pattern, Type, TypeVar, override
+from typing import Generic, Match, Pattern, Type, TypeVar
 
 import json_repair
 from pydantic import BaseModel, ValidationError
+from typing_extensions import override  # TODO: import from typing when drop support for 3.11
 
 from aisuite import Client
 
