@@ -7,14 +7,6 @@ import pytest
 
 from aisuite import Client
 
-from yaaal.core._types import (
-    ChatCompletionMessage,
-    ChatCompletionMessageToolCall,
-    ChatCompletionResponse,
-    ChatCompletionToolCallFunction,
-    Conversation,
-    ToolMessage,
-)
 from yaaal.core.caller import (
     Caller,
     CallerValidationError,
@@ -23,6 +15,16 @@ from yaaal.core.caller import (
 )
 from yaaal.core.prompt import PassthroughMessageTemplate, Prompt, StaticMessageTemplate
 from yaaal.core.tools import tool
+from yaaal.types.core import (
+    Conversation,
+    ToolMessage,
+)
+from yaaal.types.openai_compat import (
+    ChatCompletionMessage,
+    ChatCompletionMessageToolCall,
+    ChatCompletionResponse,
+    ChatCompletionToolCallFunction,
+)
 
 
 class TestCaller:

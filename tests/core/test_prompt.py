@@ -7,7 +7,6 @@ from jinja2.exceptions import UndefinedError
 from pydantic import BaseModel, ValidationError, create_model
 import pytest
 
-from yaaal.core._types import JSON, Conversation, Message
 from yaaal.core.prompt import (
     JinjaMessageTemplate,
     MessageTemplate,
@@ -16,6 +15,8 @@ from yaaal.core.prompt import (
     StaticMessageTemplate,
     StringMessageTemplate,
 )
+from yaaal.types.base import JSON
+from yaaal.types.core import Conversation, Message
 
 
 class TestMessageTemplate:

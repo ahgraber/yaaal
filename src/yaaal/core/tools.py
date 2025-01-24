@@ -2,12 +2,12 @@ from functools import wraps
 import inspect
 import json
 import logging
-import os
-from typing import Annotated, Any, Callable, Type
+from typing import Callable, Type
 
 from pydantic import BaseModel, create_model
 
-from ._types import JSON, ToolMessage
+from ..types.base import JSON
+from ..types.core import ToolMessage
 
 logger = logging.getLogger(__name__)
 

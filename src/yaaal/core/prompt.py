@@ -23,32 +23,33 @@ Prompts provide a 'signature' method to mock a function signature that details a
 from abc import abstractmethod
 import logging
 from string import Template as StringTemplate
-from typing import Annotated, Any, Type
+from typing import Any, Literal, Type
 
 from jinja2 import StrictUndefined, Template as JinjaTemplate
-from pydantic import BaseModel, BeforeValidator, Field, create_model
+from pydantic import BaseModel, create_model
 from typing_extensions import override  # TODO: import from typing when drop support for 3.11
 
-from ._types import JSON, Conversation, Message
+from ..types.base import JSON
+from ..types.core import Conversation, Message, Role
 from ..utilities import to_snake_case
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class MessageTemplate:
     """Base class for rendering a Message."""
 
-    _role: str  # NOTE: keep flexible rather than Enum or Literal
+    _role: Role
     _template: str
     _template_vars_model: Type[BaseModel] | None
 
     @property
-    def role(self) -> str:
+    def role(self) -> Role:
         """Role used in Message."""
         return self._role
 
     @role.setter
-    def role(self, role: str):
+    def role(self, role: Role):
         self._role = role
 
     @property
@@ -78,7 +79,7 @@ class MessageTemplate:
 class StaticMessageTemplate(MessageTemplate):
     """Render static messages."""
 
-    def __init__(self, role: str, template: str):
+    def __init__(self, role: Role, template: str):
         self.role = role
         self.template = template
         self.template_vars_model = None
@@ -104,7 +105,7 @@ class StringMessageTemplate(MessageTemplate):
 
     def __init__(
         self,
-        role: str,
+        role: Role,
         template: str,
         template_vars_model: Type[BaseModel] | None = None,
     ):
@@ -152,7 +153,7 @@ class PassthroughMessageTemplate(StringMessageTemplate):
 
     def __init__(
         self,
-        role: str = "user",
+        role: Literal["user"] = "user",
         template: str = "$content",
         template_vars_model: Type[BaseModel] | None = None,
     ):
@@ -176,7 +177,7 @@ class JinjaMessageTemplate(MessageTemplate):
 
     def __init__(
         self,
-        role: str,
+        role: Role,
         template: str | JinjaTemplate,
         template_vars_model: Type[BaseModel] | None = None,
     ):

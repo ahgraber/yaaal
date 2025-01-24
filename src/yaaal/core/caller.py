@@ -4,9 +4,10 @@ A Caller associates a Prompt with a specific LLM client and call parameters (ass
 This allows every Caller instance to use a different model and/or parameters, and sets expectations for the Caller instance.
 
 Since Callers leverage the LLM API directly, they can do things like function-calling / tool use.
-If a tool-call instruction is detected, the Caller will try to `invoke` that call and return the function result as the response.
+If a tool-call instruction is detected, the Caller can try to `invoke` that call and return the function result as the response.
 
 Additionally, Callers can be used as functions/tools in tool-calling workflows by leveraging Caller.signature() which denotes the inputs the Caller's Prompt requires.
+Since a Caller has a specific client and model assigned, this effectively allows us to use Callers to route to specific models for specific use cases.
 Since Callers can behave as functions themselves, we enable complex workflows where Callers can call Callers (ad infinitum ad nauseum).
 
 Optional validator mixins provide response validation based on anticipated response formatting.
@@ -21,31 +22,34 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import json
 import logging
-from typing import Any, Generic, Match, Pattern, Type, TypeVar, cast
+from typing import Generic, Match, Pattern, Type, TypeVar, override
 
 import json_repair
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from aisuite import Client
 
-from ._types import (
-    JSON,
+from .prompt import Prompt
+from .tools import CallableWithSignature, respond_as_tool
+from ..types.base import JSON
+from ..types.core import Conversation, Message, ToolMessage
+from ..types.openai_compat import (
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
     ChatCompletionResponse,
     ChatCompletionToolCallFunction,
-    Conversation,
-    Message,
-    ToolMessage,
 )
-from .prompt import Prompt
-from .tools import CallableWithSignature, respond_as_tool
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class CallerValidationError(Exception):
     pass
+
+
+# TODO: use Caller as ABC
+# make StructuredCaller, ToolCaller, RegexCaller
+# for structuredCaller, it seems like tool use is the way to cover both anthropic and openai
 
 
 class Caller(ABC):
@@ -116,6 +120,12 @@ class Caller(ABC):
         if "model" in _request_params:
             raise ValueError("'model' should be set separately and not included in 'request_params'.")
 
+        # # TODO: if we provide a pydantic model for response validation, we should set request params to specify structured generation
+        # # TODO: how can we make this work with tools?
+        # # TODO: how can we ensure correct params for all providers?
+        # if hasattr(self, "response_validator") and issubclass(self.response_validator, BaseModel):
+        #     _request_params["response_format"] = {"type": "json_object"}
+
         self._request_params = _request_params
 
     def signature(self) -> Type[BaseModel]:
@@ -149,7 +159,8 @@ class Caller(ABC):
             messages=conversation.model_dump()["messages"],
             **self.request_params,
         )
-        return ChatCompletionResponse(**response)
+
+        return ChatCompletionResponse(**response.dict())
 
     def _handle_response(
         self, conversation: Conversation, response: ChatCompletionResponse, repair: int = 0
@@ -170,32 +181,40 @@ class Caller(ABC):
     def _handle_content(self, conversation: Conversation, content: str, repair: int = 0) -> str | BaseModel:
         """Handle the message content."""
         try:
-            return self._validate_content(content)
+            if hasattr(self, "_validate_content"):
+                return self._validate_content(content)
+            else:
+                return self._default_validate_content(content)
         except Exception as e:
             if repair >= 2:  # Max 3 attempts (0, 1, 2)
                 raise CallerValidationError(f"Max repair attempts reached: {e}") from e
 
-            repair_msgs = self._render_repair(content, str(e))
-            if not repair_msgs:
-                raise CallerValidationError(f"No repair strategy: {e}") from e
+            if hasattr(self, "_render_repair"):
+                repair_msgs = self._render_repair(content, str(e))
+                if not repair_msgs:
+                    raise CallerValidationError(f"No repair strategy: {e}") from e
 
-            logger.debug(f"Attempting repair for exception raised during validation: {e}")
-            conversation.messages.extend(repair_msgs.messages)
-            return self._handle_response(
-                conversation=conversation,
-                response=self._chat_completions_create(conversation),
-                repair=repair + 1,
-            )
+                logger.debug(f"Attempting repair for exception raised during validation: {e}")
+                conversation.messages.extend(repair_msgs.messages)
+                return self._handle_response(
+                    conversation=conversation,
+                    response=self._chat_completions_create(conversation),
+                    repair=repair + 1,
+                )
+            else:
+                logger.warning("Content failed validation, returning raw")
+                return content
 
-    # abstractmethod
-    def _validate_content(self, content: str) -> str:
+    # @abstractmethod
+    def _default_validate_content(self, content: str) -> str:
         """Validate the model's response content."""
+        logger.debug("Using default (passthrough) validator.")
         return content
 
-    # abstractmethod
-    def _render_repair(self, response_content: str, exception: str) -> None:
-        """Render Conversation containing instructions to attempt to fix the validation error."""
-        return None
+    # @abstractmethod
+    # def _default_render_repair(self, response_content: str, exception: str) -> None:
+    #     """Render Conversation containing instructions to attempt to fix the validation error."""
+    #     return None
 
     # TODO: ChatCompletionMessageToolCall when aisuite updates
     def _handle_tool_call(
@@ -281,7 +300,7 @@ class PydanticResponseValidatorMixin(ValidatorMixin):
     def response_validator(self, response_validator: Type[BaseModel]):
         self._response_validator = response_validator
 
-    # override
+    @override
     def _render_repair(self, response_content: str, exception: str) -> Conversation:
         """Render Conversation containing instructions to attempt to fix the validation error."""
         messages = [
@@ -293,9 +312,10 @@ class PydanticResponseValidatorMixin(ValidatorMixin):
         ]
         return Conversation(messages=messages)
 
-    # override
+    @override
     def _validate_content(self, response: str) -> BaseModel:
         """Validate the model's response."""
+        logger.debug(f"Validating {response}")
         return self.response_validator.model_validate(json_repair.loads(response))
 
 
@@ -313,7 +333,7 @@ class RegexResponseValidatorMixin(ValidatorMixin):
     def response_validator(self, response_validator: Pattern):
         self._response_validator = response_validator
 
-    # override
+    @override
     def _render_repair(self, response_content: str, exception: str) -> Conversation:
         """Render messages array containing instructions to attempt to fix the validation error."""
         messages = [
@@ -325,7 +345,7 @@ class RegexResponseValidatorMixin(ValidatorMixin):
         ]
         return Conversation(messages=messages)
 
-    # override
+    @override
     def _validate_content(self, response: str) -> Match:
         """Validate the response against regex pattern."""
         match = self.response_validator.match(response)

@@ -3,8 +3,8 @@ from typing import Optional, Union
 from pydantic import BaseModel
 import pytest
 
-from yaaal.core._types import ToolMessage
 from yaaal.core.tools import function_schema_model, respond_as_tool, tool
+from yaaal.types.core import ToolMessage
 
 
 class TestFunctionSchema:

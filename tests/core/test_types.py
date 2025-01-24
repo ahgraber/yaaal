@@ -1,7 +1,8 @@
 from pydantic import BaseModel, ValidationError, create_model
 import pytest
 
-from yaaal.core._types import JSON, Conversation, Message
+from yaaal.types.base import JSON
+from yaaal.types.core import Conversation, Message
 
 
 class TestMessage:
@@ -19,10 +20,11 @@ class TestMessage:
             Message(content="Hello")
         assert "role" in str(exc_info.value)
 
-    def test_extra_fields_forbidden(self):
-        with pytest.raises(ValidationError) as exc_info:
-            Message(role="user", content="Hello", extra_field="not allowed")
-        assert "extra inputs are not permitted" in str(exc_info.value).lower()
+    def test_extra_fields_ignored(self):
+        message = Message(role="user", content="Hello", extra_field="not allowed")
+        assert message.role == "user"
+        assert message.content == "Hello"
+        assert set(message.model_dump()) == {"role", "content"}
 
     def test_valid_role_values(self):
         roles = ["system", "user", "assistant", "tool"]

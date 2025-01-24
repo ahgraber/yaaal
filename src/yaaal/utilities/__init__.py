@@ -1,6 +1,9 @@
+import json
 from pathlib import Path
+import textwrap
 
 from .log_helpers import LOG_FMT, basic_log_config, logging_redirect_tqdm
+from ..types.base import JSON
 
 __all__ = [
     "LOG_FMT",
@@ -48,3 +51,68 @@ def detect_encoding(rawdata: bytes) -> str:
 
     encoding = chardet.detect(rawdata)
     return encoding["encoding"] or "utf-8"
+
+
+def format_json(data: JSON, width: int = 100, indent: int = 2, level: int = 0) -> str:
+    """Format JSON data with proper indentation and line wrapping."""
+    prefix = " " * (level * indent)
+
+    if isinstance(data, dict):
+        if not data:
+            return "{}"
+
+        lines = []
+        lines.append("{")
+
+        items = list(data.items())
+        for i, (key, value) in enumerate(items):
+            key_prefix = f'{prefix}  "{key}": '
+            key_indent = " " * len(key_prefix)
+
+            formatted_value = format_json(value, width=width, indent=indent, level=level + 1)
+
+            if isinstance(value, str):
+                # Handle each line segment separately
+                segments = []
+                for segment in value.split("\n"):
+                    wrapped = textwrap.fill(
+                        segment,
+                        width=width - len(key_prefix),
+                        initial_indent=key_indent,
+                        subsequent_indent=key_indent + " ",
+                        drop_whitespace=False,
+                    )
+                    segments.append(wrapped)
+                # Join segments with newlines and proper indentation
+                formatted_value = '"{}"'.format((key_indent + "\n").join(segments).strip())
+
+            comma = "," if i < len(items) else ""
+            first_line = f"{key_prefix}{formatted_value}{comma}"
+            lines.append(first_line)
+
+        lines.append(prefix + "}")
+        return "\n".join(lines)
+
+    elif isinstance(data, list):
+        if not data:
+            return "[]"
+
+        lines = []
+        lines.append("[")
+
+        for i, item in enumerate(data):
+            formatted_item = format_json(item, width, indent, level + 1)
+            comma = "," if i <= len(data) - 1 else ""
+            lines.append(f"{prefix}  {formatted_item}{comma}")
+
+        lines.append(prefix + "]")
+        return "\n".join(lines)
+
+    elif isinstance(data, str):
+        try:
+            return format_json(json.loads(data), width, indent, level)
+        except json.JSONDecodeError:
+            return '"{}"'.format(data)
+            # return data
+    else:
+        return str(data).lower()

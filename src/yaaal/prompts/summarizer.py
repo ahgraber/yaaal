@@ -28,9 +28,9 @@ Please follow these steps to complete your task:
 
 3. If it exists, consider the user-provided guidance and ensure that your summary and analysis address the specified topics of interest or directions for investigation.
 
-4. The summary may use up to three paragraphs to highlight the main idea, argument or goal, clarify critical information, and identify actionable insights or key takeaways.
+4. The summary may use up to three paragraphs to highlight the main idea, argument or goal, clarify critical information, and identify actionable insights or key takeaways. The summary should be presented as a text document, not as a JSON object.
 
-5. Present your analysis adhering to the following json schema:
+5. Once written, format the summary as a JSON object with the following structure:
 
 {Summary.model_json_schema()}
 
