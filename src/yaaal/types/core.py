@@ -19,8 +19,8 @@ class Message(BaseModel):
     role: Role = Field(description="The role of the message author.", min_length=1)
     content: str = Field(description="The contents of the message.", min_length=1)
 
-    def __repr__(self, **kwargs):
-        return format_json(self.model_dump(), **kwargs)
+    def __repr__(self):
+        return format_json(self.model_dump())
 
 
 class ToolMessage(Message):
@@ -32,5 +32,5 @@ class ToolMessage(Message):
 class Conversation(BaseModel):
     messages: list[Message] = Field(description="The messages of the conversation.", min_length=1)
 
-    def __repr__(self, **kwargs):
-        return format_json(self.model_dump(), **kwargs)
+    def __repr__(self):
+        return format_json(self.model_dump())

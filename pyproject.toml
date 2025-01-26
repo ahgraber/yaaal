@@ -17,7 +17,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "aisuite[openai]>=0.1.7",
+  "aisuite[all]>=0.1.7",
   "asyncio>=3.4.3",
   "chardet>=5.2",
   "json-repair>=0.35",
@@ -118,3 +118,4 @@ prerelease = "if-necessary-or-explicit"
 
 [tool.uv.sources]
 yaaal = { path = "src/yaaal", editable = true }
+aisuite = { git = "https://github.com/andrewyng/aisuite" }

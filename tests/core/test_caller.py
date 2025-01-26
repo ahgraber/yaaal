@@ -1,5 +1,6 @@
 import json
 import re
+from typing import cast
 from unittest.mock import Mock, create_autospec
 
 from pydantic import BaseModel, Field, ValidationError
@@ -8,285 +9,513 @@ import pytest
 from aisuite import Client
 
 from yaaal.core.caller import (
-    Caller,
+    BaseCaller,
     CallerValidationError,
-    PydanticResponseValidatorMixin,
-    RegexResponseValidatorMixin,
+    ChatCaller,
+    RegexCaller,
+    StructuredCaller,
+    ToolCaller,
 )
 from yaaal.core.prompt import PassthroughMessageTemplate, Prompt, StaticMessageTemplate
 from yaaal.core.tools import tool
 from yaaal.types.core import (
     Conversation,
+    Message,
     ToolMessage,
 )
 from yaaal.types.openai_compat import (
+    ChatCompletion,
+    ChatCompletionChoice,
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
-    ChatCompletionResponse,
-    ChatCompletionToolCallFunction,
+    ChatCompletionMessageToolCallFunction,
+    convert_response,
 )
 
 
-class TestCaller:
-    @pytest.fixture
-    def mock_client(self):
-        return create_autospec(Client)
+@pytest.fixture
+def response_with_content():
+    response = ChatCompletion(
+        choices=[
+            ChatCompletionChoice(
+                finish_reason="stop",
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content="Hello world!",
+                    tool_calls=None,
+                    refusal=None,
+                ),
+            )
+        ]
+    )
+    return response
 
+
+@pytest.fixture
+def response_with_tool_call():
+    response = ChatCompletion(
+        choices=[
+            ChatCompletionChoice(
+                finish_reason="tool_calls",
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[
+                        ChatCompletionMessageToolCall(
+                            id="tool42",
+                            function=ChatCompletionMessageToolCallFunction(
+                                name="testname",
+                                arguments="testargs",
+                            ),
+                        )
+                    ],
+                    refusal=None,
+                ),
+            )
+        ]
+    )
+    return response
+
+
+class TestBaseCaller:
     @pytest.fixture
-    def simple_prompt(self):
-        return Prompt(
-            name="Prompt",
-            description="Prompt for unit tests",
-            system_template=StaticMessageTemplate(role="system", template="This is a test"),
-            user_template=PassthroughMessageTemplate(),
+    def response_with_content(self):
+        response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content="Hello world!",
+                        tool_calls=None,
+                        refusal=None,
+                    ),
+                )
+            ]
         )
+        return response
 
     @pytest.fixture
-    def mock_response(self):
-        return create_autospec(ChatCompletionResponse)
-
-    @pytest.fixture
-    def caller(self, mock_client, simple_prompt):
-        class TestCaller(Caller):
-            def __init__(self):
-                self.client = mock_client
-                self.model = "modelname"
-                self.prompt = simple_prompt
-
-        caller = TestCaller()
-        return caller
-
-    @pytest.fixture
-    def add3(self):
-        @tool
-        def add3(a: int, b: int) -> int:
-            return a + b + 3
-
-        return add3
-
-    def test_client_property(self, caller, mock_client):
-        assert caller.client == mock_client
-
-    def test_model_property(self, caller):
-        assert caller.model == "modelname"
-
-    def test_prompt_property(self, caller, simple_prompt):
-        assert caller.prompt == simple_prompt
-
-    def test_toolbox_property(self, caller):
-        assert caller.toolbox == {}
-
-    def test_auto_invoke_property(self, caller):
-        assert caller.auto_invoke is False
-
-    def test_request_params_property(self, caller):
-        assert caller.request_params == {}
-
-    def test_signature_method(self, caller, simple_prompt):
-        assert caller.signature().model_json_schema() == simple_prompt.signature().model_json_schema()
-
-    def test_call_method(self, caller, mock_response):
-        pass
-
-    def test_handle_response_with_content(self, caller, mock_response):
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
-
-        content = "response message content"
-        mock_response.choices = [Mock(message=Mock(content=content, tool_calls=None))]
-
-        # given the response contains a tool call, we should just check that _handle_tool_call is called
-        caller._handle_content = Mock(return_value="content handled")
-
-        result = caller._handle_response(conversation=conversation, response=mock_response)
-        assert result == "content handled"
-
-    def test_handle_response_with_tool_call(self, caller, add3, mock_response):
-        # add tool to toolbox
-        caller.toolbox = [add3]
-
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
-
-        kwargs = {"a": 1, "b": 2}
-        tool_call = ChatCompletionMessageToolCall(
-            id="tc_123",
-            function=ChatCompletionToolCallFunction(
-                name="add3",
-                arguments=json.dumps(kwargs),
-            ),
+    def response_with_tool_call(self):
+        response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="tool_calls",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content=None,
+                        tool_calls=[
+                            ChatCompletionMessageToolCall(
+                                id="tool42",
+                                function=ChatCompletionMessageToolCallFunction(
+                                    name="testname",
+                                    arguments="testargs",
+                                ),
+                            )
+                        ],
+                        refusal=None,
+                    ),
+                )
+            ]
         )
-        mock_response.choices = [Mock(message=Mock(content=None, tool_calls=[tool_call]))]
+        return response
 
-        # given the response contains a tool call, we should just check that _handle_tool_call is called
-        caller._handle_tool_call = Mock(return_value="tool called")
+    def test_client_property(self):
+        caller = BaseCaller()
 
-        result = caller._handle_response(conversation=conversation, response=mock_response)
-        assert result == "tool called"
+        client = create_autospec(Client)
+        caller.client = client
+        assert caller.client == client
 
-    def test_handle_response_with_unexpected(self, caller, mock_response):
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
-        mock_response.choices = [Mock(message=Mock(content=None, tool_calls=None))]
+    def test_model_property(self):
+        caller = BaseCaller()
+
+        model = "provider:model"
+        caller.model = model
+        assert caller.model == model
+
+    def test_prompt_property(self):
+        caller = BaseCaller()
+
+        prompt = create_autospec(Prompt)
+        caller.prompt = prompt
+        assert caller.prompt == prompt
+
+    def test_request_params_property(self):
+        caller = BaseCaller()
+
+        params = {"param1": "value1"}
+        caller.request_params = params
+        assert caller.request_params == params
+
+    def test_max_repair_attempts_property(self):
+        caller = BaseCaller()
+
+        attempts = 3
+        caller.max_repair_attempts = attempts
+        assert caller.max_repair_attempts == attempts
+
+    def test_signature(self):
+        caller = BaseCaller()
+
+        prompt = create_autospec(Prompt)
+        caller.prompt = prompt
+        caller.prompt.signature.return_value = BaseModel
+        assert caller.signature() == BaseModel
+
+    def test_call(self):
+        caller = BaseCaller()
+
+        caller.client = create_autospec(Client)
+        caller.model = "provider:model"
+        caller.prompt = create_autospec(Prompt)
+        caller.request_params = {"param1": "value1"}
+
+        caller._chat_completions_create = Mock(return_value=create_autospec(ChatCompletion))
+        caller._handle_response = Mock(return_value="response")
+
+        result = caller(system_vars={}, user_vars={})
+        assert result == "response"
+
+    def test_chat_completions_create(self):
+        from aisuite.framework import ChatCompletionResponse as AISuiteChatCompletionResponse
+
+        caller = BaseCaller()
+        caller.client = create_autospec(Client)
+        caller.model = "provider:model"
+        caller.prompt = create_autospec(Prompt)
+        caller.request_params = {"param1": "value1"}
+
+        conversation = create_autospec(Conversation)
+        conversation.model_dump.return_value = {"messages": []}
+        caller.client.chat.completions.create.return_value = AISuiteChatCompletionResponse()
+
+        result = caller._chat_completions_create(conversation)
+        assert isinstance(result, ChatCompletion)
+
+    def test_handle_response_with_content(self, response_with_content):
+        caller = BaseCaller()
+
+        caller._handle_content = Mock(return_value="content")
+
+        result = caller._handle_response(
+            conversation=create_autospec(Conversation),
+            response=response_with_content,
+        )
+        assert result == "content"
+
+    def test_handle_response_with_tool_call(self, response_with_tool_call):
+        caller = BaseCaller()
+
+        caller._handle_tool_call = Mock(return_value="tool_call")
+
+        result = caller._handle_response(
+            conversation=create_autospec(Conversation),
+            response=response_with_tool_call,
+        )
+        assert result == "tool_call"
+
+    def test_handle_response_with_unexpected_response(self, response_with_content):
+        caller = BaseCaller()
+
+        response_with_content.choices[0].message.content = None
+        response_with_content.choices[0].message.tool_calls = None
+
         with pytest.raises(ValueError):
-            caller._handle_response(conversation=conversation, response=mock_response)
+            caller._handle_response(
+                conversation=create_autospec(Conversation),
+                response=response_with_content,
+            )
 
-    def test_handle_content_with_valid_content(self, caller):
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
+    def test_handle_content(self):
+        caller = BaseCaller()
 
         caller._validate_content = Mock(return_value="validated_content")
+        # caller._repair_response = Mock(return_value=None)
 
-        result = caller._handle_content(conversation=conversation, content="content")
+        result = caller._handle_content(
+            conversation=create_autospec(Conversation),
+            content="content",
+        )
         assert result == "validated_content"
 
-    def test_handle_content_with_invalid_content(self, caller):
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
+    def test_handle_content_with_repair(self, response_with_content):
+        caller = BaseCaller()
+        caller.max_repair_attempts = 3
 
-        caller._validate_content = Mock(side_effect=Exception("validation error"))
-        caller._render_repair = Mock(return_value=None)
+        # induce error in _validate_content
+        caller._validate_content = Mock(side_effect=Exception("error"))
+        # triggering _repair_response
+        caller._repair_response = Mock(
+            return_value=Conversation(
+                messages=[
+                    Message(role="assistant", content="invalid"),
+                    Message(role="system", content="fix this"),
+                ]
+            )
+        )
+        # the repair call to _chat_completions_create should return a valid response object
+        caller._chat_completions_create = Mock(return_value=response_with_content)
+        caller._handle_response = Mock(return_value="repaired_content")
+
+        result = caller._handle_content(
+            conversation=Conversation(
+                messages=[
+                    Message(role="system", content="original instructions"),
+                    Message(role="assistant", content="invalid"),
+                    Message(role="system", content="fix this"),
+                ]
+            ),
+            content="bad_content",
+        )
+        assert result == "repaired_content"
+
+    def test_handle_content_with_max_repair_attempts(self, response_with_content):
+        caller = BaseCaller()
+        caller.max_repair_attempts = 1
+
+        caller._validate_content = Mock(side_effect=Exception("error"))
+        caller._repair_response = Mock(
+            return_value=Conversation(
+                messages=[
+                    Message(role="assistant", content="invalid"),
+                    Message(role="system", content="fix this"),
+                ]
+            )
+        )
+
+        caller._chat_completions_create = Mock(return_value=response_with_content)
 
         with pytest.raises(CallerValidationError):
-            caller._handle_content(conversation=conversation, content="content")
+            caller._handle_content(
+                conversation=Conversation(
+                    messages=[
+                        Message(role="system", content="original instructions"),
+                        Message(role="assistant", content="invalid"),
+                        Message(role="system", content="fix this"),
+                    ]
+                ),
+                content="content",
+            )
 
-    def test_handle_tool_call_with_valid_tool(self, caller, add3):
-        #        add tool to toolbox
-        caller.toolbox = [add3]
-        caller.auto_invoke = False
+    def test_handle_tool_call(self):
+        caller = BaseCaller()
+        with pytest.raises(NotImplementedError):
+            caller._handle_tool_call(conversation=create_autospec(Conversation), tool_call=Mock())
 
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
+    def test_validate_tool(self):
+        caller = BaseCaller()
+        with pytest.raises(NotImplementedError):
+            caller._validate_tool(name="name", arguments="arguments")
 
-        kwargs = {"a": 1, "b": 2}
-        tool_call = ChatCompletionMessageToolCall(
-            id="tc_123",
-            function=ChatCompletionToolCallFunction(
-                name="add3",
-                arguments=json.dumps(kwargs),
-            ),
-        )
-        result = caller._handle_tool_call(conversation=conversation, tool_call=tool_call)
-
-        # since auto_invoke is False, the result should be a BaseModel that defines the tool call
-        assert isinstance(result, BaseModel)
-        assert result.__class__.__name__ == "add3"
-        assert result.a == 1
-        assert result.b == 2
-
-    def test_handle_tool_call_with_valid_tool_invoked(self, caller, add3):
-        #        add tool to toolbox
-        caller.toolbox = [add3]
-        caller.auto_invoke = True
-
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
-
-        kwargs = {"a": 1, "b": 2}
-        tool_call = ChatCompletionMessageToolCall(
-            id="tc_123",
-            function=ChatCompletionToolCallFunction(
-                name="add3",
-                arguments=json.dumps(kwargs),
-            ),
-        )
-        result = caller._handle_tool_call(conversation=conversation, tool_call=tool_call)
-
-        # since auto_invoke is True, the result should be a ToolMessage containing the function result
-        assert isinstance(result, ToolMessage)
-        assert result.tool_call_id == "tc_123"
-        assert result.content == str(add3(**kwargs)) == str(6)
-
-    def test_handle_tool_call_with_invalid_tool(self, caller, add3):
-        #        add tool to toolbox
-        caller.toolbox = [add3]
-        caller.auto_invoke = False
-
-        conversation = caller.prompt.render(user_vars={"content": "testing 1, 2, 3"})
-
-        kwargs = {"a": 1, "b": 2}
-        tool_call = ChatCompletionMessageToolCall(
-            id="tc_123",
-            function=ChatCompletionToolCallFunction(
-                name="not_a_tool",
-                arguments=json.dumps(kwargs),
-            ),
-        )
-        with pytest.raises(KeyError):
-            caller._handle_tool_call(conversation=conversation, tool_call=tool_call)
+    def test_repair_tool(self):
+        caller = BaseCaller()
+        with pytest.raises(NotImplementedError):
+            caller._repair_tool(tool_call=Mock(), exception="exception")
 
 
-class TestPydanticResponseValidatorMixin:
+class TestChatCaller:
+    # This just adds a nice init to BaseCaller
+    pass
+
+
+class TestRegexCaller:
     @pytest.fixture
-    def person(self):
-        class Person(BaseModel):
-            name: str
-            age: int
-            likes: list[str] = Field(min_length=2)
+    def regex_caller(self):
+        client = create_autospec(Client)
+        model = "provider:model"
+        prompt = create_autospec(Prompt)
+        response_validator = re.compile(r"Hello\s\w+!")
+        return RegexCaller(
+            client=client,
+            model=model,
+            prompt=prompt,
+            response_validator=response_validator,
+        )
 
-        return Person
+    def test_response_validator_property(self, regex_caller):
+        pattern = re.compile(r"New\sPattern")
+        regex_caller.response_validator = pattern
+        assert regex_caller.response_validator == pattern
+
+    def test_validate_content(self, regex_caller):
+        response = "Hello world!"
+        result = regex_caller._validate_content(response)
+        assert result == "Hello world!"
+
+    def test_validate_content_no_match(self, regex_caller):
+        response = "Goodbye world!"
+        with pytest.raises(ValueError, match="Response did not match expected pattern"):
+            regex_caller._validate_content(response)
+
+    def test_repair_response(self, regex_caller):
+        response_content = "Invalid response"
+        exception = "Response did not match expected pattern"
+
+        conversation = regex_caller._repair_response(response_content, exception)
+        assert len(conversation.messages) == 2
+        assert conversation.messages[0].role == "assistant"
+        assert conversation.messages[0].content == response_content
+        assert conversation.messages[1].role == "user"
+        assert "Response must match the following regex pattern" in conversation.messages[1].content
+        assert regex_caller.response_validator.pattern in conversation.messages[1].content
+
+
+class TestStructuredCaller:
+    @pytest.fixture
+    def add3(self):
+        def add3(x: int, y: int) -> int:
+            "A fancy way to add."
+            return x + y + 3
+
+        return tool(add3)
 
     @pytest.fixture
-    def valid_json(self):
-        return {"name": "Bob", "age": 42, "likes": ["pizza", "ice cream"]}
+    def structured_caller(self, add3):
+        client = create_autospec(Client)
+        model = "provider:model"
+        prompt = create_autospec(Prompt)
+        response_validator = add3.signature()
+        return StructuredCaller(
+            client=client,
+            model=model,
+            prompt=prompt,
+            response_validator=response_validator,
+        )
 
-    @pytest.fixture
-    def mixin(self, person):
-        class TestClass(PydanticResponseValidatorMixin):
-            def __init__(self):
-                self.response_validator = person
+    def test_make_request_params(self, structured_caller):
+        request_params = {"param1": "value1"}
+        result = structured_caller._make_request_params(request_params)
+        assert "tools" in result
+        assert "tool_choice" in result
 
-        return TestClass()
+    def test_response_validator_property(self, structured_caller):
+        new_validator = create_autospec(BaseModel)
+        structured_caller.response_validator = new_validator
+        assert structured_caller.response_validator == new_validator
 
-    def test_validate_with_valid_jsonstr(self, mixin, person, valid_json):
-        testcase = json.dumps(valid_json)
-        assert json.loads(testcase)  # ensure valid json
+    def test_validate_content(self, structured_caller):
+        response = json.dumps({"key": "value"})
+        structured_caller.response_validator.model_validate = Mock(return_value="validated_response")
 
-        result = mixin._validate_content(testcase)
-        assert isinstance(result, person)
+        result = structured_caller._validate_content(response)
+        assert result == "validated_response"
 
-    def test_validate_with_invalid_jsonstr_quotes(self, mixin, person, valid_json):
-        testcase = str(valid_json)
-        # ensure testcase is invalid json
-        with pytest.raises(json.JSONDecodeError):
-            _ = json.loads(testcase)
-
-        result = mixin._validate_content(testcase)
-        assert isinstance(result, person)
-
-    def test_validate_with_invalid(self, mixin, person):
-        testcase = json.dumps({"name": "Bob", "age": 42, "likes": []})
-
+    def test_validate_content_with_exception(self, structured_caller):
+        response = '{"key": "value"}'
+        structured_caller.response_validator.model_validate = Mock(
+            side_effect=ValidationError("mock validation error", [])
+        )
         with pytest.raises(ValidationError):
-            _ = mixin._validate_content(testcase)
+            structured_caller._validate_content(response)
 
+    def test_repair_response(self, structured_caller):
+        response_content = '{"key": "value"}'
+        exception = "Validation error"
 
-class TestRegexResponseValidatorMixin:
-    @pytest.fixture
-    def response_type(self):
-        return re.compile(r"^(\w+),\s*(\d+)$")  # matches "name, age" format
+        conversation = structured_caller._repair_response(response_content, exception)
 
-    @pytest.fixture
-    def valid_str(self) -> str:
-        return "Bob, 42"
+        assert len(conversation.messages) == 2
+        assert conversation.messages[0].role == "assistant"
+        assert conversation.messages[0].content == response_content
+        assert conversation.messages[1].role == "user"
+        assert exception in conversation.messages[1].content
 
-    @pytest.fixture
-    def mixin(self, response_type):
-        class TestClass(RegexResponseValidatorMixin):
-            def __init__(self):
-                self.response_validator = response_type
+    def test_handle_tool_call(self, structured_caller, add3):
+        arguments = {"x": 1, "y": 2}
 
-        return TestClass()
+        tool_call = ChatCompletionMessageToolCall(
+            id="tool42",
+            function=ChatCompletionMessageToolCallFunction(
+                name="add3",
+                arguments=json.dumps(arguments),
+            ),
+        )
 
-    def test_validate_with_valid_string(self, mixin, valid_str):
-        result = mixin._validate_content(valid_str)
-        assert isinstance(result, re.Match)
-        assert result.groups() == ("Bob", "42")
+        result = structured_caller._handle_tool_call(conversation=create_autospec(Conversation), tool_call=tool_call)
 
-    def test_validate_with_invalid_string(self, mixin):
-        invalid_str = "Invalid Format!"
-        with pytest.raises(ValueError):
-            mixin._validate_content(invalid_str)
+        assert result.x == arguments["x"]
+        assert result.y == arguments["y"]
+        assert result.model_dump() == add3.signature().model_validate(arguments).model_dump()
 
-    def test_match_groups_extraction(self, mixin, valid_str):
-        result = mixin._validate_content(valid_str)
-        name, age = result.groups()
-        assert name == "Bob"
-        assert age == "42"
+    def test_handle_tool_call_with_validation_error(self, structured_caller, add3):
+        arguments = {"x": 1, "z": None}
 
-    def test_validate_with_none(self, mixin):
-        with pytest.raises(TypeError):
-            mixin._validate_content(None)
+        tool_call = ChatCompletionMessageToolCall(
+            id="tool42",
+            function=ChatCompletionMessageToolCallFunction(
+                name="add3",
+                arguments=json.dumps(arguments),
+            ),
+        )
+
+        structured_caller._chat_completions_create = Mock(return_value=create_autospec(ChatCompletion))
+        structured_caller._handle_response = Mock(return_value="repaired_tool")
+
+        result = structured_caller._handle_tool_call(
+            conversation=Conversation(
+                messages=[
+                    Message(role="system", content="original instructions"),
+                    Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
+                    Message(role="system", content="fix this"),
+                ]
+            ),
+            tool_call=tool_call,
+        )
+        assert result == "repaired_tool"
+
+    def test_handle_tool_call_with_max_repair_attempts(self, structured_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "z": None}
+
+        tool_call = ChatCompletionMessageToolCall(
+            id="tool42",
+            function=ChatCompletionMessageToolCallFunction(
+                name="add3",
+                arguments=json.dumps(arguments),
+            ),
+        )
+        structured_caller.max_repair_attempts = 1
+
+        structured_caller._repair_tool = Mock(
+            return_value=Conversation(
+                messages=[
+                    Message(role="assistant", content="invalid"),
+                    Message(role="system", content="fix this"),
+                ]
+            )
+        )
+        structured_caller._chat_completions_create = Mock(return_value=response_with_tool_call)
+
+        with pytest.raises(CallerValidationError):
+            structured_caller._handle_tool_call(
+                conversation=Conversation(
+                    messages=[
+                        Message(role="system", content="original instructions"),
+                        Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
+                        Message(role="system", content="fix this"),
+                    ]
+                ),
+                tool_call=tool_call,
+            )
+
+    def test_validate_tool(self, structured_caller):
+        arguments = '{"key": "value"}'
+        structured_caller.response_validator.model_validate = Mock(return_value="validated_tool")
+        result = structured_caller._validate_tool(name="testname", arguments=arguments)
+        assert result == "validated_tool"
+
+    def test_repair_tool(self, structured_caller):
+        tool_call = ChatCompletionMessageToolCall(
+            id="tool42",
+            function=ChatCompletionMessageToolCallFunction(
+                name="testname",
+                arguments='{"key": "value"}',
+            ),
+        )
+        exception = "Validation error"
+        conversation = structured_caller._repair_tool(tool_call, exception)
+        assert len(conversation.messages) == 2
+        assert conversation.messages[0].role == "assistant"
+        assert conversation.messages[0].content == tool_call.function.model_dump_json()
+        assert conversation.messages[1].role == "user"
+        assert exception in conversation.messages[1].content

@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from ..core import (
+from ..core.prompt import (
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
     Prompt,

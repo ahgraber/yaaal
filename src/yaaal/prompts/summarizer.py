@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from ..core import (
+from ..core.prompt import (
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
     Prompt,
@@ -32,7 +32,9 @@ Please follow these steps to complete your task:
 
 5. Once written, format the summary as a JSON object with the following structure:
 
+<schema>
 {Summary.model_json_schema()}
+</schema>
 
 Here is the source you need to analyze:
 

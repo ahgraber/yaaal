@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 
 from .extractor import Extract
 from .summarizer import Summary
-from ..core import (
+from ..core.prompt import (
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
     Prompt,

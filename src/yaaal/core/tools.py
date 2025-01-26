@@ -12,7 +12,7 @@ from ..types.core import ToolMessage
 logger = logging.getLogger(__name__)
 
 
-def function_schema_model(fn: Callable) -> Type[BaseModel]:
+def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
     """Generate a Pydantic BaseModel that represents a function's signature.
 
     Requires type hints and docstrings for accurate schema.
@@ -93,7 +93,7 @@ class CallableWithSignature:
 
     def signature(self) -> Type[BaseModel]:
         """Return the signature of the wrapped function."""
-        return function_schema_model(self.func)
+        return pydantic_function_signature(self.func)
 
     def tool_response(self, *args, tool_call_id: str, **kwargs) -> ToolMessage:
         """Call the function with tool_call_id (required) and arguments."""
@@ -109,3 +109,21 @@ class CallableWithSignature:
 def tool(func: Callable) -> CallableWithSignature:
     """Convert Callable to CallableWithSignature as decorator."""
     return CallableWithSignature(func)
+
+
+def anthropic_pydantic_function_tool(model: Type[BaseModel]) -> dict:
+    """Convert Pydantic model to Anthropic-formatted tool spec."""
+    import openai
+
+    schema = openai.pydantic_function_tool(model)
+    function = schema["function"]
+
+    return {
+        "name": function["name"],
+        "description": function["description"],
+        "input_schema": {
+            "type": "object",
+            "properties": function["parameters"]["properties"],
+            "required": function["parameters"].get("required", []),
+        },
+    }

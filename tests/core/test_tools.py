@@ -3,7 +3,7 @@ from typing import Optional, Union
 from pydantic import BaseModel
 import pytest
 
-from yaaal.core.tools import function_schema_model, respond_as_tool, tool
+from yaaal.core.tools import pydantic_function_signature, respond_as_tool, tool
 from yaaal.types.core import ToolMessage
 
 
@@ -12,7 +12,7 @@ class TestFunctionSchema:
         def sample_fn(x: int, y: str) -> None:
             pass
 
-        model = function_schema_model(sample_fn)
+        model = pydantic_function_signature(sample_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -27,7 +27,7 @@ class TestFunctionSchema:
         def union_fn(x: Union[int, str]) -> None:
             pass
 
-        model = function_schema_model(union_fn)
+        model = pydantic_function_signature(union_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -38,7 +38,7 @@ class TestFunctionSchema:
         def union_fn(x: int | str) -> None:
             pass
 
-        model = function_schema_model(union_fn)
+        model = pydantic_function_signature(union_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -49,7 +49,7 @@ class TestFunctionSchema:
         def optional_fn(x: Optional[int] = None, y: str = "default") -> None:
             pass
 
-        model = function_schema_model(optional_fn)
+        model = pydantic_function_signature(optional_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -63,7 +63,7 @@ class TestFunctionSchema:
         def variadic_fn(*args: int, **kwargs: str) -> None:
             pass
 
-        model = function_schema_model(variadic_fn)
+        model = pydantic_function_signature(variadic_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -78,7 +78,7 @@ class TestFunctionSchema:
                 pass
 
         instance = SampleClass()
-        model = function_schema_model(instance.method)
+        model = pydantic_function_signature(instance.method)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -91,7 +91,7 @@ class TestFunctionSchema:
             """Test documentation."""
             pass
 
-        model = function_schema_model(documented_fn)
+        model = pydantic_function_signature(documented_fn)
         assert issubclass(model, BaseModel)
 
         schema = model.model_json_schema()
@@ -102,7 +102,7 @@ class TestFunctionSchema:
             pass
 
         with pytest.raises(TypeError):
-            function_schema_model(untyped_fn)
+            pydantic_function_signature(untyped_fn)
 
 
 class ToolResponse:
