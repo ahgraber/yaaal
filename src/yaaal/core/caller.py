@@ -506,7 +506,14 @@ class ToolCaller(BaseCaller):
 
     @toolbox.setter
     def toolbox(self, toolbox: list[BaseCaller | CallableWithSignature]):
-        self._toolbox = {tool.signature().__name__: tool for tool in toolbox}
+        tb = {}
+        for tool in toolbox:
+            if not isinstance(tool, (BaseCaller, CallableWithSignature)):
+                raise TypeError(
+                    f"Toolbox requires Caller or CallableWithSignature objects.  Received {tool}: {type(tool)}"
+                )
+            tb[tool.signature().__name__] = tool
+        self._toolbox = tb
 
     @property
     def auto_invoke(self) -> bool:
@@ -605,7 +612,7 @@ class ToolCaller(BaseCaller):
         name = tool_call.function.name
 
         messages = [
-            Message(role="assistant", content=json.dumps(tool_call.function)),
+            Message(role="assistant", content=tool_call.function.model_dump_json()),
             Message(
                 role="user",
                 content=textwrap.dedent(

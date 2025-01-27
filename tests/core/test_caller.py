@@ -1,6 +1,6 @@
 import json
 import re
-from typing import cast
+from typing import Pattern, cast
 from unittest.mock import Mock, create_autospec
 
 from pydantic import BaseModel, Field, ValidationError
@@ -52,6 +52,15 @@ def response_with_content():
 
 
 @pytest.fixture
+def add3():
+    def add3(x: int, y: int) -> int:
+        "A fancy way to add."
+        return x + y + 3
+
+    return tool(add3)
+
+
+@pytest.fixture
 def response_with_tool_call():
     response = ChatCompletion(
         choices=[
@@ -64,8 +73,8 @@ def response_with_tool_call():
                         ChatCompletionMessageToolCall(
                             id="tool42",
                             function=ChatCompletionMessageToolCallFunction(
-                                name="testname",
-                                arguments="testargs",
+                                name="add3",
+                                arguments=json.dumps({"x": 1, "y": 2}),
                             ),
                         )
                     ],
@@ -336,11 +345,15 @@ class TestRegexCaller:
     def test_response_validator_property(self, regex_caller):
         pattern = re.compile(r"New\sPattern")
         regex_caller.response_validator = pattern
+
+        assert isinstance(regex_caller.response_validator, Pattern)
         assert regex_caller.response_validator == pattern
 
     def test_validate_content(self, regex_caller):
         response = "Hello world!"
         result = regex_caller._validate_content(response)
+
+        assert isinstance(result, str)
         assert result == "Hello world!"
 
     def test_validate_content_no_match(self, regex_caller):
@@ -353,6 +366,8 @@ class TestRegexCaller:
         exception = "Response did not match expected pattern"
 
         conversation = regex_caller._repair_response(response_content, exception)
+
+        assert isinstance(conversation, Conversation)
         assert len(conversation.messages) == 2
         assert conversation.messages[0].role == "assistant"
         assert conversation.messages[0].content == response_content
@@ -363,19 +378,12 @@ class TestRegexCaller:
 
 class TestStructuredCaller:
     @pytest.fixture
-    def add3(self):
-        def add3(x: int, y: int) -> int:
-            "A fancy way to add."
-            return x + y + 3
-
-        return tool(add3)
-
-    @pytest.fixture
     def structured_caller(self, add3):
         client = create_autospec(Client)
         model = "provider:model"
         prompt = create_autospec(Prompt)
         response_validator = add3.signature()
+
         return StructuredCaller(
             client=client,
             model=model,
@@ -386,20 +394,30 @@ class TestStructuredCaller:
     def test_make_request_params(self, structured_caller):
         request_params = {"param1": "value1"}
         result = structured_caller._make_request_params(request_params)
+        assert request_params["param1"] == "value1"
+        assert isinstance(request_params, dict)
         assert "tools" in result
         assert "tool_choice" in result
+
+        request_params = {"model": "this should fail"}
+        with pytest.raises(ValueError):
+            structured_caller._make_request_params(request_params)
 
     def test_response_validator_property(self, structured_caller):
         new_validator = create_autospec(BaseModel)
         structured_caller.response_validator = new_validator
+
+        assert isinstance(structured_caller.response_validator, BaseModel)
         assert structured_caller.response_validator == new_validator
 
     def test_validate_content(self, structured_caller):
-        response = json.dumps({"key": "value"})
-        structured_caller.response_validator.model_validate = Mock(return_value="validated_response")
+        response = json.dumps({"x": 1, "y": 2})
 
         result = structured_caller._validate_content(response)
-        assert result == "validated_response"
+
+        assert isinstance(result, BaseModel)
+        assert result.x == 1
+        assert result.y == 2
 
     def test_validate_content_with_exception(self, structured_caller):
         response = '{"key": "value"}'
@@ -415,39 +433,29 @@ class TestStructuredCaller:
 
         conversation = structured_caller._repair_response(response_content, exception)
 
+        assert isinstance(conversation, Conversation)
         assert len(conversation.messages) == 2
         assert conversation.messages[0].role == "assistant"
         assert conversation.messages[0].content == response_content
         assert conversation.messages[1].role == "user"
         assert exception in conversation.messages[1].content
 
-    def test_handle_tool_call(self, structured_caller, add3):
+    def test_handle_tool_call(self, structured_caller, add3, response_with_tool_call):
         arguments = {"x": 1, "y": 2}
-
-        tool_call = ChatCompletionMessageToolCall(
-            id="tool42",
-            function=ChatCompletionMessageToolCallFunction(
-                name="add3",
-                arguments=json.dumps(arguments),
-            ),
-        )
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
 
         result = structured_caller._handle_tool_call(conversation=create_autospec(Conversation), tool_call=tool_call)
 
+        assert isinstance(result, BaseModel)
         assert result.x == arguments["x"]
         assert result.y == arguments["y"]
         assert result.model_dump() == add3.signature().model_validate(arguments).model_dump()
 
-    def test_handle_tool_call_with_validation_error(self, structured_caller, add3):
+    def test_handle_tool_call_with_validation_error(self, structured_caller, add3, response_with_tool_call):
         arguments = {"x": 1, "z": None}
-
-        tool_call = ChatCompletionMessageToolCall(
-            id="tool42",
-            function=ChatCompletionMessageToolCallFunction(
-                name="add3",
-                arguments=json.dumps(arguments),
-            ),
-        )
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
 
         structured_caller._chat_completions_create = Mock(return_value=create_autospec(ChatCompletion))
         structured_caller._handle_response = Mock(return_value="repaired_tool")
@@ -466,20 +474,15 @@ class TestStructuredCaller:
 
     def test_handle_tool_call_with_max_repair_attempts(self, structured_caller, add3, response_with_tool_call):
         arguments = {"x": 1, "z": None}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
 
-        tool_call = ChatCompletionMessageToolCall(
-            id="tool42",
-            function=ChatCompletionMessageToolCallFunction(
-                name="add3",
-                arguments=json.dumps(arguments),
-            ),
-        )
         structured_caller.max_repair_attempts = 1
 
         structured_caller._repair_tool = Mock(
             return_value=Conversation(
                 messages=[
-                    Message(role="assistant", content="invalid"),
+                    Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
                     Message(role="system", content="fix this"),
                 ]
             )
@@ -498,22 +501,181 @@ class TestStructuredCaller:
                 tool_call=tool_call,
             )
 
-    def test_validate_tool(self, structured_caller):
-        arguments = '{"key": "value"}'
-        structured_caller.response_validator.model_validate = Mock(return_value="validated_tool")
-        result = structured_caller._validate_tool(name="testname", arguments=arguments)
-        assert result == "validated_tool"
+    def test_validate_tool(self, structured_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "y": 2}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
 
-    def test_repair_tool(self, structured_caller):
-        tool_call = ChatCompletionMessageToolCall(
-            id="tool42",
-            function=ChatCompletionMessageToolCallFunction(
-                name="testname",
-                arguments='{"key": "value"}',
-            ),
-        )
+        result = structured_caller._validate_tool(name="add3", arguments=json.dumps(arguments))
+
+        assert isinstance(result, BaseModel)
+        assert result.model_dump() == add3.signature().model_validate(arguments).model_dump()
+
+    def test_repair_tool(self, structured_caller, response_with_tool_call):
+        arguments = {"x": 1, "z": None}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
         exception = "Validation error"
         conversation = structured_caller._repair_tool(tool_call, exception)
+
+        assert isinstance(conversation, Conversation)
+        assert len(conversation.messages) == 2
+        assert conversation.messages[0].role == "assistant"
+        assert conversation.messages[0].content == tool_call.function.model_dump_json()
+        assert conversation.messages[1].role == "user"
+        assert exception in conversation.messages[1].content
+
+
+class TestToolCaller:
+    @pytest.fixture
+    def caller(self):
+        client = create_autospec(Client)
+        model = "provider:model"
+        prompt = Prompt(
+            name="caller-as-a-tool",
+            description="A caller to test tool-calling functionality",
+            system_template=StaticMessageTemplate(role="system", template="The system is down. The system is down."),
+            user_template=PassthroughMessageTemplate(),
+        )
+
+        return ChatCaller(
+            client=client,
+            model=model,
+            prompt=prompt,
+        )
+
+    @pytest.fixture
+    def tool_caller(self, add3, caller):
+        client = create_autospec(Client)
+        model = "provider:model"
+        prompt = create_autospec(Prompt)
+        return ToolCaller(
+            client=client,
+            model=model,
+            prompt=prompt,
+            toolbox=[add3, caller],
+            auto_invoke=False,
+        )
+
+    def test_toolbox_property(self, tool_caller, add3, caller):
+        assert {"add3", "caller_as_a_tool"} == set(tool_caller.toolbox)
+        assert tool_caller.toolbox["add3"] == add3
+        assert tool_caller.toolbox["caller_as_a_tool"] == caller
+
+        with pytest.raises(TypeError):
+            tool_caller.toolbox = ["failme"]
+
+    def test_auto_invoke_property(self, tool_caller):
+        assert tool_caller.auto_invoke is False
+
+        tool_caller.auto_invoke = True
+        assert tool_caller.auto_invoke is True
+
+    def test_make_request_params(self, tool_caller):
+        request_params = {"param1": "value1"}
+        result = tool_caller._make_request_params(request_params)
+
+        assert isinstance(request_params, dict)
+        assert request_params["param1"] == "value1"
+        assert "tools" in result
+        assert "tool_choice" in result
+
+        request_params = {"model": "this should fail"}
+        with pytest.raises(ValueError):
+            tool_caller._make_request_params(request_params)
+
+    def test_handle_tool_call_no_invoke(self, tool_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "y": 2}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        result = tool_caller._handle_tool_call(conversation=create_autospec(Conversation), tool_call=tool_call)
+
+        assert isinstance(result, BaseModel)
+        assert result.x == arguments["x"]
+        assert result.y == arguments["y"]
+        assert result.model_dump() == add3.signature().model_validate(arguments).model_dump()
+
+    def test_handle_tool_call_with_invoke(self, tool_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "y": 2}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        tool_caller.auto_invoke = True
+        result = tool_caller._handle_tool_call(conversation=create_autospec(Conversation), tool_call=tool_call)
+
+        assert isinstance(result, ToolMessage)
+        assert result.content == "6"
+
+    def test_handle_tool_call_with_validation_error(self, tool_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "z": None}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        tool_caller._chat_completions_create = Mock(return_value=create_autospec(ChatCompletion))
+        tool_caller._handle_response = Mock(return_value="repaired_tool")
+
+        result = tool_caller._handle_tool_call(
+            conversation=Conversation(
+                messages=[
+                    Message(role="system", content="original instructions"),
+                    Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
+                    Message(role="system", content="fix this"),
+                ]
+            ),
+            tool_call=tool_call,
+        )
+        assert result == "repaired_tool"
+
+    def test_handle_tool_call_with_max_repair_attempts(self, tool_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "z": None}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        tool_caller.max_repair_attempts = 1
+
+        tool_caller._repair_tool = Mock(
+            return_value=Conversation(
+                messages=[
+                    Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
+                    Message(role="system", content="fix this"),
+                ]
+            )
+        )
+        tool_caller._chat_completions_create = Mock(return_value=response_with_tool_call)
+
+        with pytest.raises(CallerValidationError):
+            tool_caller._handle_tool_call(
+                conversation=Conversation(
+                    messages=[
+                        Message(role="system", content="original instructions"),
+                        Message(role="assistant", content=json.dumps({"name": "add3", "arguments": arguments})),
+                        Message(role="system", content="fix this"),
+                    ]
+                ),
+                tool_call=tool_call,
+            )
+
+    def test_validate_tool(self, tool_caller, add3, response_with_tool_call):
+        arguments = {"x": 1, "y": 2}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        result = tool_caller._validate_tool(name="add3", arguments=json.dumps(arguments))
+
+        assert isinstance(result, BaseModel)
+        assert result.model_dump() == add3.signature().model_validate(arguments).model_dump()
+
+    def test_repair_tool(self, tool_caller, response_with_tool_call):
+        arguments = {"x": 1, "z": None}
+        tool_call = response_with_tool_call.choices[0].message.tool_calls[0]
+        tool_call.function.arguments = json.dumps(arguments)
+
+        exception = "Validation error"
+        conversation = tool_caller._repair_tool(tool_call, exception)
+
+        assert isinstance(conversation, Conversation)
         assert len(conversation.messages) == 2
         assert conversation.messages[0].role == "assistant"
         assert conversation.messages[0].content == tool_call.function.model_dump_json()
