@@ -1,5 +1,5 @@
-from .extractor import Extract, ExtractorPrompt
-from .memo_writer import MemoWriterPrompt
-from .summarizer import SummarizerPrompt, Summary
+from .extractor import Extract, extractor_prompt
+from .memo_writer import memowriter_prompt
+from .summarizer import Summary, summarizer_prompt
 
-__all__ = ["Extract", "ExtractorPrompt", "Summary", "SummarizerPrompt", "MemoWriterPrompt"]
+__all__ = ["Extract", "extractor_prompt", "Summary", "summarizer_prompt", "memowriter_prompt"]

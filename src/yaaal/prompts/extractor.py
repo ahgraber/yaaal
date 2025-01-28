@@ -87,7 +87,7 @@ class ExtractorUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to focus the analysis")
 
 
-ExtractorPrompt = Prompt(
+extractor_prompt = Prompt(
     name="Extractor",
     description="Extract information from provided content",
     system_template=JinjaMessageTemplate(

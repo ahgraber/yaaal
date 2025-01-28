@@ -68,7 +68,7 @@ class MemoWriterUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to direct the draft")
 
 
-MemoWriterPrompt = Prompt(
+memowriter_prompt = Prompt(
     name="Memo Writer",
     description="Generate a summary of provided content",
     system_template=JinjaMessageTemplate(

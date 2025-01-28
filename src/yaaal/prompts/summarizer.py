@@ -52,7 +52,7 @@ class SummarizerUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to focus the analysis")
 
 
-SummarizerPrompt = Prompt(
+summarizer_prompt = Prompt(
     name="Summarizer",
     description="Generate a summary of provided content",
     system_template=JinjaMessageTemplate(

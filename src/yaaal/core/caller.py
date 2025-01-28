@@ -3,6 +3,8 @@
 A Caller associates a Prompt with a specific LLM client and call parameters (assumes OpenAI-compatibility through a framework like `aisuite`).
 This allows every Caller instance to use a different model and/or parameters, and sets expectations for the Caller instance.
 
+Whereas `Prompts` validate _inputs_ to the template, `Callers` validate the LLM responses.
+
 Since Callers leverage the LLM API directly, they can do things like function-calling / tool use.
 If a tool-call instruction is detected, the Caller can try to `invoke` that call and return the function result as the response.
 
@@ -10,11 +12,13 @@ Additionally, Callers can be used as functions/tools in tool-calling workflows b
 Since a Caller has a specific client and model assigned, this effectively allows us to use Callers to route to specific models for specific use cases.
 Since Callers can behave as functions themselves, we enable complex workflows where Callers can call Callers (ad infinitum ad nauseum).
 
-Optional validator mixins provide response validation based on anticipated response formatting.
+`ChatCaller` is a simple Caller implementation designed for chat messages without response validation.
 
-PydanticResponseValidatorMixin validates the response based on a Pydantic object (it is recommended to use JSON mode, Structured Outputs, or Function-Calling for reliability).
+`RegexCaller` uses regex for response validation.
 
-RegexResponseValidatorMixin validates the response based on regex matching.
+`StructuredCaller` is intended for structured responses, and uses Pydantic for response validation.
+
+`ToolCaller` is a configuration for tool-use, and can optionally invoke the tool based on arguments in the LLM's response and return the function results.
 """
 
 from __future__ import annotations
@@ -75,6 +79,7 @@ class BaseCaller:
     @model.setter
     def model(self, model: str):
         self._model = model
+        logger.debug(f"All API requests for {self.__class__.__name__} will use model : {self._model}")
 
     @property
     def prompt(self) -> Prompt:
@@ -93,7 +98,7 @@ class BaseCaller:
     @request_params.setter
     def request_params(self, request_params: dict[str, JSON] | None):
         self._request_params = self._make_request_params(request_params)
-        logger.debug(f"All API requests for {self.__class__.__name__} will use : {self._request_params}")
+        logger.debug(f"All API requests for {self.__class__.__name__} will use params : {self._request_params}")
 
     def _make_request_params(self, request_params: dict[str, JSON] | None) -> dict[str, JSON]:
         """Construct the request parameters."""
@@ -128,8 +133,8 @@ class BaseCaller:
     def __call__(
         self,
         *,
-        system_vars: dict,
-        user_vars: dict | None,
+        system_vars: dict | None = None,
+        user_vars: dict | None = None,
         conversation: Conversation | None = None,
     ) -> str | BaseModel | ToolMessage:
         """Call the API."""
@@ -198,6 +203,7 @@ class BaseCaller:
 
             else:
                 logger.debug(f"Attempting repair for exception raised during content validation: {e}")
+                logger.debug(f"Erroneous response content: {content}")
                 conversation.messages.extend(repair_msgs.messages)
                 return self._handle_response(
                     conversation=conversation,
@@ -477,7 +483,10 @@ class StructuredCaller(BaseCaller):
 
 
 class ToolCaller(BaseCaller):
-    """Provides client and standard parameters used for each call."""
+    """Caller implementation that is designed for tool use.
+
+    Tool arguments are validated based on the tool schema (via Pydantic), and the Caller can optionally `invoke` the call and return the function results.
+    """
 
     def __init__(
         self,
@@ -512,7 +521,11 @@ class ToolCaller(BaseCaller):
                 raise TypeError(
                     f"Toolbox requires Caller or CallableWithSignature objects.  Received {tool}: {type(tool)}"
                 )
-            tb[tool.signature().__name__] = tool
+            try:
+                tb[tool.signature().__name__] = tool
+            except Exception:
+                logger.exception(f"Error while defining toolbox entry for {str(tool)}")
+                raise
         self._toolbox = tb
 
     @property
@@ -594,9 +607,17 @@ class ToolCaller(BaseCaller):
             except Exception:
                 logger.exception(f"Unexpected Exception while invoking function {function.name}({function.arguments})")
                 raise
+
+            if isinstance(result, BaseModel):
+                content = result.model_dump_json()
+            elif isinstance(result, str):
+                content = result
+            else:
+                content = json.dumps(result)
+
             return ToolMessage(
                 tool_call_id=tool_call.id,
-                content=result if isinstance(result, str) else json.dumps(result),
+                content=content,
             )
         else:
             return validated
