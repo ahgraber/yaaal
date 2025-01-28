@@ -6,8 +6,8 @@ import tqdm
 LOG_FMT = "%(asctime)s - %(levelname)-8s - %(name)s - %(funcName)s:%(lineno)d - %(message)s"
 
 
-def basic_log_config(level=logging.INFO, **kwargs) -> None:
-    """Configure logging defaults."""
+def basic_log_config(level=logging.WARNING, **kwargs) -> None:
+    """Configure logging defaults for all loggers."""
     logging.basicConfig(level=level, format=LOG_FMT, **kwargs)
 
 

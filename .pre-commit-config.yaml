@@ -24,40 +24,40 @@ repos:
     hooks:
       - id: check-added-large-files
         args: [--maxkb=500000]
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-case-conflict
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-merge-conflict
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-ast
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-json
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-toml
-        stages: [commit]
+        stages: [pre-commit]
       - id: check-yaml
-        stages: [commit]
+        stages: [pre-commit]
       - id: end-of-file-fixer
-        stages: [commit]
+        stages: [pre-commit]
       - id: mixed-line-ending
-        stages: [commit]
+        stages: [pre-commit]
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
-        stages: [commit]
+        stages: [pre-commit]
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: "v1.5.5"
     hooks:
       - id: remove-crlf
-        stages: [commit]
+        stages: [pre-commit]
       # - id: remove-tabs
-      #   stages: [commit]
+      #   stages: [pre-commit]
   - repo: https://github.com/sirosen/texthooks
     rev: "0.6.8"
     hooks:
       - id: fix-smartquotes
-        stages: [commit]
+        stages: [pre-commit]
       - id: fix-ligatures
-        stages: [commit]
+        stages: [pre-commit]
   - repo: https://github.com/zricethezav/gitleaks
     rev: "v8.23.1"
     hooks:
@@ -70,7 +70,7 @@ repos:
         args:
           - --config=.markdownlint.yaml
           - --fix
-        stages: [commit]
+        stages: [pre-commit]
   # ### NOTE: Prettier broke plugins:
   #           https://github.com/pre-commit/mirrors-prettier/blob/main/README.md
   # - repo: local
@@ -85,7 +85,7 @@ repos:
   #         - --no-error-on-unmatched-pattern
   #         # - "--ignore-path '**/*.md'"
   #         # - "--ignore-path '**/*.y*ml'"
-  #       stages: [commit]
+  #       stages: [pre-commit]
   - repo: https://github.com/tox-dev/pyproject-fmt
     rev: "v2.5.0"
     hooks:
@@ -94,16 +94,21 @@ repos:
     rev: "v0.9.2"
     hooks:
       - id: ruff
-        name: Lint and Format with Ruff
+        name: Lint with Ruff
         args:
           - --fix
           - --config=.ruff.toml
-        stages: [commit]
+        stages: [pre-commit]
+      - id: ruff-format
+        name: Format with Ruff
+        args:
+          - --config=.ruff.toml
+        stages: [pre-commit]
   - repo: https://github.com/kynan/nbstripout
     rev: "0.8.1"
     hooks:
       - id: nbstripout
-        stages: [commit]
+        stages: [pre-commit]
   - repo: https://github.com/koalaman/shellcheck-precommit # local
     rev: "v0.10.0"
     hooks:
@@ -113,7 +118,7 @@ repos:
         entry: shellcheck
         types: ["shell"]
         exclude: "^.*zsh$" # ignore '*.zsh" scripts'
-        stages: [commit]
+        stages: [pre-commit]
   - repo: https://github.com/scop/pre-commit-shfmt
     rev: "v3.10.0-2"
     hooks:
@@ -124,7 +129,7 @@ repos:
           - "2"
           - -ci
           - -bn
-        stages: [commit]
+        stages: [pre-commit]
   ### NOTE: ".typos.toml" may be required to have _already been committed_
   ### in order for typos pre-commit hook to read it.
   ### In this case, comment out this block until ".typos.toml" has been committed successfully
@@ -139,11 +144,11 @@ repos:
             ^.*(\.typos\.toml)$ |
             ^.*(\.git.*)$
           )$
-        stages: [commit]
+        stages: [pre-commit]
   - repo: https://github.com/adrienverge/yamllint.git
     rev: "v1.35.1"
     hooks:
       - id: yamllint
         name: Lint yaml files
         args: [-c=.yamllint.yaml]
-        stages: [commit]
+        stages: [pre-commit]

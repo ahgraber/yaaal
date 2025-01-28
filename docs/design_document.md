@@ -79,7 +79,14 @@ Validation: Before rendering a template into a message, optional validation chec
 
 ### 3.4 Separation of Prompt and LLM API
 
-**Callable Interface**: The Caller object makes the Prompt callable by implementing Python's `__call__()` method. It abstracts the execution of prompts, handling the communication with external APIs or services.
+**Caller Interface**: The Caller object associates a Prompt with a specific LLM client and call parameters (assumes OpenAI-compatibility through a framework like `aisuite`).
+This allows every Caller instance to use a different model and/or parameters, setting clear expectations for each instance's behavior.
+
+**Tool Use**: `yaaal` is designed to use LLM APIs with as minimal a translation layer as possible, enabling advanced features like function-calling and tool use.
+When a tool-call instruction is detected, the Caller can attempt to invoke that call and return the function result as the response.
+
+**Callable as Tools**: Callers themselves can be used as functions/tools in tool-calling workflows by exposing their Prompt's input requirements through the `signature()` method.
+Since each Caller has a specific client and model assigned, this enables routing specific tasks to specific models. This composability allows complex workflows where Callers can invoke other Callers.
 
 **Response Validation**: The Caller can include optional validation logic to ensure the API response is correct before passing it to the agent.
 
@@ -111,7 +118,7 @@ Each component--Message, Conversation, MessageTemplate, Prompt, Caller, Agent --
 
 ### 4.4 Dependencies and Compatibility
 
-**Core Dependencies**: `yaaal` has minimal dependencies but assumes Pydantic>=2.10 and optionally uses OpenTelemetry for tracing.
+**Core Dependencies**: `yaaal` has minimal dependencies but assumes `aisuite` and `pydantic>=2.10` and optionally uses OpenTelemetry for tracing.
 
 **Compatibility**: Works in any standard Python environment (>=3.11) and can be easily integrated with other tools and services. We generally assume we are building for OpenAI API compatibility.
 
