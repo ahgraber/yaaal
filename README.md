@@ -19,7 +19,7 @@ It aims to offer developers a simple yet flexible toolkit for creating autonomou
 
 ## Quickstart
 
-Install, then see [examples](./examples/)
+Install, then check out how to use [Prompts](./examples/demo-prompt.ipynb) and [Callers](./examples/demo-caller.ipynb)
 
 ## Installation
 
