@@ -13,7 +13,9 @@
     - [3.2 Message Templates](#32-message-templates)
     - [3.3 Prompt Creation](#33-prompt-creation)
     - [3.4 Separation of Prompt and LLM API](#34-separation-of-prompt-and-llm-api)
-    - [3.4 Tool Use](#34-tool-use)
+    - [3.5 Tool Use](#35-tool-use)
+    - [3.6 Sequential Processing](#36-sequential-processing)
+    - [3.7 Agentic Decisions](#37-agentic-decisions)
   - [4. Architecture and Design](#4-architecture-and-design)
   - [4.1 Overview of Architecture](#41-overview-of-architecture)
     - [4.2 Design Patterns and Principles](#42-design-patterns-and-principles)
@@ -90,7 +92,7 @@ Since each Caller has a specific client and model assigned, this enables routing
 
 **Response Validation**: The Caller can include optional validation logic to ensure the API response is correct before passing it to the agent.
 
-### 3.4 Tool Use
+### 3.5 Tool Use
 
 **Tool Abstraction**: Tools are functions that provide specialized functionality, such as making an API call or performing a calculation. `yaaal` makes provisions for use of native python functions as well as Callers as tools.
 
@@ -98,6 +100,17 @@ Since each Caller has a specific client and model assigned, this enables routing
 The `@tool` decorator allows the developer to denote Python functions as callable tools that agents can invoke during their workflows.
 Both `@tool` decorated functions and Caller objects have a `signature()` method that describes the tool inputs as a Pydantic BaseModel
 for easy conversion to json schema, allowing easy integration into LLM tool-calling requests.
+
+### 3.6 Sequential Processing
+
+**Flow**: Flows process a predefined series of steps (Caller | CallableWithSignature) before returning a final response.
+Flows are a special version of Caller and therefore have a tool signature and can be invoked as functions through Callers, Flows, or Agents.
+
+### 3.7 Agentic Decisions
+
+**Agent**: Agents use LLMs control the workflow -- the AI system handles conditional logic instead of relying on code or the end user.
+This means that an Agent may identify applicable tools for the request,
+create a plan to follow, and determine when to continue or when to revert control to the user.
 
 ## 4. Architecture and Design
 
