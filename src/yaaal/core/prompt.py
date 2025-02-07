@@ -315,8 +315,8 @@ class Prompt:
 
         return Conversation(messages=messages)
 
-    def _get_signature(self) -> Type[BaseModel]:
-        """Define function signature as pydantic model."""
+    def signature(self) -> Type[BaseModel]:
+        """Provide function signature as json schema."""
         field_definitions = {}
 
         if isinstance(self.system_template, StaticMessageTemplate):

@@ -47,3 +47,11 @@ class Conversation(BaseModel):
 
     def __repr__(self):
         return format_json(self.model_dump())
+
+
+ValidatorResult: TypeAlias = Union[str, BaseModel]
+APIHandlerResult: TypeAlias = Union[
+    AssistantMessage,
+    ToolResultMessage,
+    # BaseModel,
+]
