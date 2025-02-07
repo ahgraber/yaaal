@@ -121,6 +121,10 @@ class ToolHandler(BaseHandler):
         else:
             content = json.dumps(result)
 
+        # NOTE: The handler returns a ToolResultMessage if invocation succeeds
+        #       which may result in adding ToolResultMessage to the Conversation
+        #       without the corresponding prior ChatCompletionToolCall
+        # TODO: Is this a problem?
         return ToolResultMessage(tool_call_id=tool_call.id, content=content)
 
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
