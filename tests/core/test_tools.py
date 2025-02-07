@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import pytest
 
 from yaaal.core.tools import pydantic_function_signature, respond_as_tool, tool
-from yaaal.types.core import ToolMessage
+from yaaal.types.core import ToolResultMessage
 
 
 class TestFunctionSchema:
@@ -108,23 +108,23 @@ class TestFunctionSchema:
 class ToolResponse:
     def test_tool_response(self):
         tm = respond_as_tool(tool_call_id="test_id", response=6)
-        assert isinstance(tm, ToolMessage)
+        assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "6"
 
         tm = respond_as_tool(tool_call_id="test_id", response="bob")
-        assert isinstance(tm, ToolMessage)
+        assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "bob"
 
     def test_tool_response_no_response(self):
         tm = respond_as_tool(tool_call_id="test_id")
-        assert isinstance(tm, ToolMessage)
+        assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "null"
 
         tm = respond_as_tool(tool_call_id="test_id", response=None)
-        assert isinstance(tm, ToolMessage)
+        assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "null"
 
@@ -138,7 +138,7 @@ class ToolResponse:
             return SampleModel(x=x, y=y)
 
         tm = respond_as_tool(tool_call_id="test_id", response=sample_fn(x=1, y="test"))
-        assert isinstance(tm, ToolMessage)
+        assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == '{"x":1,"y":"test"}'
 
@@ -198,12 +198,12 @@ class TestToolDecorator:
 
     def test_tool_decorator_response(self, add3, name3):
         response = add3.tool_response(1, 2, tool_call_id="test_id")
-        assert isinstance(response, ToolMessage)
+        assert isinstance(response, ToolResultMessage)
         assert response.tool_call_id == "test_id"
         assert response.content == "6"
 
         response = name3.tool_response(tool_call_id="test_id", x=1, name="bob")
-        assert isinstance(response, ToolMessage)
+        assert isinstance(response, ToolResultMessage)
         assert response.tool_call_id == "test_id"
         assert response.content == "bob13"
 
@@ -217,7 +217,7 @@ class TestToolDecorator:
             return SampleModel(x=x, y=y)
 
         response = sample_fn.tool_response(tool_call_id="test_id", x=1, y="test")
-        assert isinstance(response, ToolMessage)
+        assert isinstance(response, ToolResultMessage)
         assert response.tool_call_id == "test_id"
         assert response.content == '{"x":1,"y":"test"}'
 

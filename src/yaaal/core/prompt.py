@@ -204,7 +204,7 @@ class JinjaMessageTemplate(MessageTemplate):
 
     @override
     def render_message(self, template_vars: dict[str, Any] | BaseModel) -> Message:
-        """Render the system message."""
+        """Render the message."""
         vars_ = template_vars if isinstance(template_vars, dict) else template_vars.model_dump()
 
         # If no template_vars_model, render w/o validation
@@ -267,7 +267,7 @@ class Prompt:
         return Conversation(messages=messages)
 
     def signature(self) -> Type[BaseModel]:
-        """Provide function signature as json schema."""
+        """Provide function signature as pydantic model."""
         field_definitions = {}
 
         if not isinstance(self.system_template, StaticMessageTemplate):

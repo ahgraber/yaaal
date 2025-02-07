@@ -7,13 +7,13 @@ from typing import Callable, Type
 from pydantic import BaseModel, create_model
 
 from ..types.base import JSON
-from ..types.core import ToolMessage
+from ..types.core import ToolResultMessage
 
 logger = logging.getLogger(__name__)
 
 
 def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
-    """Generate a Pydantic BaseModel that represents a function's signature.
+    """Generate a Pydantic model that represents a function's signature.
 
     Requires type hints and docstrings for accurate schema.
     Ref:
@@ -64,7 +64,7 @@ def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
     return model
 
 
-def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolMessage:
+def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:
     """Return response as a ToolMessage."""
     if tool_call_id is None:
         raise ValueError("tool_call_id is required")
@@ -80,7 +80,7 @@ def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolMessage:
             logger.debug(f"Could not serialize result as json string: {e}")
             responsestr = str(response)
 
-    return ToolMessage(tool_call_id=tool_call_id, content=responsestr)
+    return ToolResultMessage(tool_call_id=tool_call_id, content=responsestr)
 
 
 class CallableWithSignature:
@@ -95,7 +95,7 @@ class CallableWithSignature:
         """Return the signature of the wrapped function."""
         return pydantic_function_signature(self.func)
 
-    def tool_response(self, *args, tool_call_id: str, **kwargs) -> ToolMessage:
+    def tool_response(self, *args, tool_call_id: str, **kwargs) -> ToolResultMessage:
         """Call the function with tool_call_id (required) and arguments."""
         if tool_call_id is None:
             raise ValueError("tool_call_id is required")
