@@ -112,7 +112,9 @@ class ToolHandler(BaseHandler):
         logger.debug(f"Invoking {function.name}")
         tool = self.validator.toolbox[function.name]
         result = tool(**validated.model_dump())
-        if isinstance(result, BaseModel):
+        if isinstance(result, APIHandlerResult):
+            content = result.content
+        elif isinstance(result, BaseModel):
             content = result.model_dump_json()
         elif isinstance(result, str):
             content = result

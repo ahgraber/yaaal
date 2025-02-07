@@ -203,7 +203,7 @@ def create_tool_caller(
 ) -> Caller:
     """Create a Caller for tool use."""
     handler = ToolHandler(ToolValidator(toolbox), auto_invoke)
-    params = request_params or {} | _make_tool_params(model, toolbox)
+    params = (request_params or {}) | _make_tool_params(model, toolbox)
     return Caller(client, model, prompt, handler, params)
 
 
