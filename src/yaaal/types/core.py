@@ -50,7 +50,7 @@ class Conversation(BaseModel):
 
 
 ValidatorResult: TypeAlias = Union[str, BaseModel]
-APIHandlerResult: TypeAlias = Union[
+ResponseMessage: TypeAlias = Union[
     AssistantMessage,
     ToolResultMessage,
     # BaseModel,

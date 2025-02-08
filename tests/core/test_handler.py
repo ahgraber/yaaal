@@ -15,6 +15,7 @@ from yaaal.types.base import JSON
 from yaaal.types.core import (
     AssistantMessage,
     Conversation,
+    ResponseMessage,
     ToolResultMessage,
     UserMessage,
 )
