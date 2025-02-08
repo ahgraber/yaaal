@@ -34,7 +34,7 @@ from .prompt import Prompt
 from .tools import CallableWithSignature, anthropic_pydantic_function_tool
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types.base import JSON
-from ..types.core import APIHandlerResult, Conversation
+from ..types.core import Conversation, ResponseMessage
 from ..types.openai_compat import ChatCompletion, convert_response
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ class Caller(BaseCaller):
         system_vars: dict | None = None,
         user_vars: dict | None = None,
         conversation: Conversation | None = None,
-    ) -> APIHandlerResult:
+    ) -> ResponseMessage:
         """Call the API."""
         rendered = self.prompt.render(system_vars=system_vars, user_vars=user_vars)
         if conversation:
@@ -140,7 +140,7 @@ class Caller(BaseCaller):
 
     def _handle_with_repair(
         self, conversation: Conversation, response: ChatCompletion, repair_attempt: int = 0
-    ) -> APIHandlerResult:
+    ) -> ResponseMessage:
         """Handle response with repair attempts."""
         try:
             return self.handler(response)

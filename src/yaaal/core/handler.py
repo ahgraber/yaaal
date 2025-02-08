@@ -25,7 +25,7 @@ from .base import BaseHandler, BaseValidator, ResponseError, ValidationError
 from .tools import CallableWithSignature
 from .validator import ToolValidator
 from ..types.base import JSON
-from ..types.core import APIHandlerResult, AssistantMessage, Conversation, ToolResultMessage, ValidatorResult
+from ..types.core import AssistantMessage, Conversation, ResponseMessage, ToolResultMessage, ValidatorResult
 from ..types.openai_compat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ class ResponseHandler(BaseHandler):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> APIHandlerResult:
+    def __call__(self, response: ChatCompletion) -> ResponseMessage:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:
@@ -92,7 +92,7 @@ class ToolHandler(BaseHandler):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> APIHandlerResult:
+    def __call__(self, response: ChatCompletion) -> ResponseMessage:
         """Process the LLM response."""
         msg = response.choices[0].message
         if not msg.tool_calls:
@@ -112,7 +112,7 @@ class ToolHandler(BaseHandler):
         logger.debug(f"Invoking {function.name}")
         tool = self.validator.toolbox[function.name]
         result = tool(**validated.model_dump())
-        if isinstance(result, APIHandlerResult):
+        if isinstance(result, ResponseMessage):
             content = result.content
         elif isinstance(result, BaseModel):
             content = result.model_dump_json()
@@ -143,7 +143,7 @@ class CompositeHandler(BaseHandler):
         self.content_handler = content_handler or None
         self.tool_handler = tool_handler or None
 
-    def __call__(self, response: ChatCompletion) -> APIHandlerResult:
+    def __call__(self, response: ChatCompletion) -> ResponseMessage:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:

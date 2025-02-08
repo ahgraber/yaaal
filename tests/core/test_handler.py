@@ -10,9 +10,9 @@ from yaaal.core.tools import tool
 from yaaal.core.validator import PassthroughValidator, ToolValidator
 from yaaal.types.base import JSON
 from yaaal.types.core import (
-    APIHandlerResult,
     AssistantMessage,
     Conversation,
+    ResponseMessage,
     ToolResultMessage,
     UserMessage,
     ValidatorResult,

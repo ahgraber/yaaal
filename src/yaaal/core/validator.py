@@ -27,9 +27,9 @@ from typing_extensions import override
 from .base import BaseCaller, BaseValidator, ValidationError
 from .tools import CallableWithSignature
 from ..types.core import (
-    APIHandlerResult,
     AssistantMessage,
     Conversation,
+    ResponseMessage,
     ToolResultMessage,
     UserMessage,
     ValidatorResult,

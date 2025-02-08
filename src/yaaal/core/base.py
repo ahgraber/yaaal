@@ -10,7 +10,7 @@ from aisuite import Client
 
 from .prompt import Prompt
 from ..types.base import JSON
-from ..types.core import APIHandlerResult, Conversation, Message, ValidatorResult
+from ..types.core import Conversation, Message, ResponseMessage, ValidatorResult
 from ..types.openai_compat import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -42,6 +42,7 @@ class BaseValidator(Protocol):
         raise NotImplementedError
 
 
+@runtime_checkable
 class BaseHandler(Protocol):
     """Protocol for response handlers."""
 
@@ -50,7 +51,7 @@ class BaseHandler(Protocol):
         """Maximum number of times to retry validation."""
         ...
 
-    def __call__(self, response: ChatCompletion) -> APIHandlerResult:
+    def __call__(self, response: ChatCompletion) -> ResponseMessage:
         """Process the LLM response."""
         raise NotImplementedError
 
@@ -96,6 +97,6 @@ class BaseCaller(Protocol):
         system_vars: dict | None = None,
         user_vars: dict | None = None,
         conversation: Conversation | None = None,
-    ) -> APIHandlerResult:
+    ) -> ResponseMessage:
         """Execute the API Call."""
         ...
