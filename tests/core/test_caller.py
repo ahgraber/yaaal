@@ -114,7 +114,7 @@ def structured_response():
 
 @pytest.fixture
 def add_tool():
-    @tool
+    @Tool
     def add3(x: int, y: int) -> int:
         """A fancy way to add."""
         return x + y + 3

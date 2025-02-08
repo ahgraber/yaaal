@@ -31,7 +31,7 @@ from yaaal.types.openai_compat import (
 
 @pytest.fixture
 def test_tool():
-    @tool
+    @Tool
     def test_tool(name: str, age: int) -> tuple:
         return (name, age)
 
@@ -280,7 +280,7 @@ class TestToolHandler:
 class TestCompositeHandler:
     @pytest.fixture
     def test_tool(self):
-        @tool
+        @Tool
         def test_tool(name: str, age: int) -> tuple:
             return (name, age)
 
