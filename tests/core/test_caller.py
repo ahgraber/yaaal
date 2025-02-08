@@ -11,7 +11,7 @@ import pytest
 from aisuite import Client
 from aisuite.framework import ChatCompletionResponse
 
-from yaaal.core.base import ValidationError
+from yaaal.core.base import CallableWithSignature
 from yaaal.core.caller import (
     Caller,
     _make_structured_params,
@@ -20,9 +20,10 @@ from yaaal.core.caller import (
     create_structured_caller,
     create_tool_caller,
 )
+from yaaal.core.exceptions import ValidationError
 from yaaal.core.handler import CompositeHandler, ResponseHandler, ToolHandler
 from yaaal.core.prompt import Prompt, StaticMessageTemplate, StringMessageTemplate
-from yaaal.core.tools import CallableWithSignature, tool
+from yaaal.core.tools import Tool
 from yaaal.core.validator import PassthroughValidator, PydanticValidator, ToolValidator
 from yaaal.types.core import AssistantMessage, Conversation, ToolResultMessage, UserMessage
 from yaaal.types.openai_compat import (
@@ -113,7 +114,7 @@ def structured_response():
 
 @pytest.fixture
 def add_tool():
-    @tool
+    @Tool
     def add3(x: int, y: int) -> int:
         """A fancy way to add."""
         return x + y + 3

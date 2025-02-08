@@ -4,7 +4,7 @@ import logging
 from typing import Protocol, Type
 
 from pydantic import BaseModel
-from typing_extensions import runtime_checkable
+from typing_extensions import TypeVar, runtime_checkable
 
 from aisuite import Client
 
@@ -21,16 +21,23 @@ from ..types.openai_compat import (
 
 logger = logging.getLogger(__name__)
 
-
-class ResponseError(Exception):
-    pass
+CallableReturnType = TypeVar("CallableReturnType", covariant=True)
 
 
-class ValidationError(Exception):
-    pass
+@runtime_checkable
+class CallableWithSignature(Protocol[CallableReturnType]):
+    """Base protocol for Callables with signature."""
+
+    def __call__(self, *args, **kwargs) -> CallableReturnType:
+        """Execute the operation."""
+        ...
+
+    def signature(self) -> Type[BaseModel]:
+        """Provide the callable signature as json schema."""
+        ...
 
 
-class BaseValidator(Protocol):
+class Validator(Protocol):
     """Base protocol for all validators."""
 
     def validate(self, completion: str | ChatCompletionMessageToolCall) -> ValidatorResult:
@@ -43,7 +50,7 @@ class BaseValidator(Protocol):
 
 
 @runtime_checkable
-class BaseHandler(Protocol):
+class Handler(Protocol):
     """Protocol for response handlers."""
 
     @property

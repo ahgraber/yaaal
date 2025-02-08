@@ -4,9 +4,10 @@ from pydantic import BaseModel
 import pytest
 from typing_extensions import override
 
-from yaaal.core.base import BaseValidator, ResponseError, ValidationError
+from yaaal.core.base import Validator
+from yaaal.core.exceptions import ResponseError, ValidationError
 from yaaal.core.handler import CompositeHandler, ResponseHandler, ToolHandler
-from yaaal.core.tools import tool
+from yaaal.core.tools import Tool
 from yaaal.core.validator import PassthroughValidator, ToolValidator
 from yaaal.types.base import JSON
 from yaaal.types.core import (
@@ -29,7 +30,7 @@ from yaaal.types.openai_compat import (
 
 @pytest.fixture
 def test_tool():
-    @tool
+    @Tool
     def test_tool(name: str, age: int) -> tuple:
         return (name, age)
 
@@ -38,7 +39,7 @@ def test_tool():
 
 @pytest.fixture
 def fail_content_validator():
-    class FailValidator(BaseValidator):
+    class FailValidator(Validator):
         @override
         def validate(self, completion: str | ChatCompletionMessageToolCall) -> str:
             raise ValidationError
@@ -211,7 +212,7 @@ class TestToolHandler:
 class TestCompositeHandler:
     @pytest.fixture
     def test_tool(self):
-        @tool
+        @Tool
         def test_tool(name: str, age: int) -> tuple:
             return (name, age)
 

@@ -21,7 +21,8 @@ import logging
 
 from pydantic import BaseModel
 
-from .base import BaseHandler, BaseValidator, ResponseError, ValidationError
+from .base import Handler, Validator
+from .exceptions import ResponseError, ValidationError
 from .tools import CallableWithSignature
 from .validator import ToolValidator
 from ..types.base import JSON
@@ -31,12 +32,12 @@ from ..types.openai_compat import ChatCompletion, ChatCompletionMessage, ChatCom
 logger = logging.getLogger(__name__)
 
 
-class ResponseHandler(BaseHandler):
+class ResponseHandler(Handler):
     """Handles content responses with validation."""
 
     def __init__(
         self,
-        validator: BaseValidator,
+        validator: Validator,
         max_repair_attempts: int = 2,
     ):
         self.validator = validator
@@ -70,7 +71,7 @@ class ResponseHandler(BaseHandler):
         return self.validator.repair_instructions(message.content, error)
 
 
-class ToolHandler(BaseHandler):
+class ToolHandler(Handler):
     """Handles tool responses with validation and optional invocation."""
 
     def __init__(
@@ -134,7 +135,7 @@ class ToolHandler(BaseHandler):
         return self.validator.repair_instructions(message.tool_calls[0], error)
 
 
-class CompositeHandler(BaseHandler):
+class CompositeHandler(Handler):
     """Handles both content and tool responses."""
 
     max_repair_attempts: None  # managed by sub-handlers

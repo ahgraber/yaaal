@@ -24,7 +24,8 @@ import json_repair
 from pydantic import BaseModel
 from typing_extensions import override
 
-from .base import BaseCaller, BaseValidator, ValidationError
+from .base import Validator
+from .exceptions import ValidationError
 from .tools import CallableWithSignature
 from ..types.core import (
     AssistantMessage,
@@ -45,7 +46,7 @@ from ..types.openai_compat import (
 logger = logging.getLogger(__name__)
 
 
-class PassthroughValidator(BaseValidator):
+class PassthroughValidator(Validator):
     """Simple validator that passes content through unchanged."""
 
     @override
@@ -57,7 +58,7 @@ class PassthroughValidator(BaseValidator):
         return None
 
 
-class PydanticValidator(BaseValidator):
+class PydanticValidator(Validator):
     """Validate using Pydantic models."""
 
     def __init__(self, model: type[BaseModel]):
@@ -86,7 +87,7 @@ class PydanticValidator(BaseValidator):
         )
 
 
-class RegexValidator(BaseValidator):
+class RegexValidator(Validator):
     """Validate using regex patterns."""
 
     def __init__(self, pattern: Pattern):
@@ -117,22 +118,22 @@ class RegexValidator(BaseValidator):
         )
 
 
-class ToolValidator(BaseValidator):
+class ToolValidator(Validator):
     """Validate tool calls."""
 
-    def __init__(self, toolbox: list[BaseCaller | CallableWithSignature]):
+    def __init__(self, toolbox: list[CallableWithSignature]):
         self.toolbox = toolbox
 
     @property
-    def toolbox(self) -> dict[str, BaseCaller | CallableWithSignature]:
+    def toolbox(self) -> dict[str, CallableWithSignature]:
         """Available tools."""
         return self._toolbox
 
     @toolbox.setter
-    def toolbox(self, toolbox: list[BaseCaller | CallableWithSignature]):
+    def toolbox(self, toolbox: list[CallableWithSignature]):
         tb = {}
         for tool in toolbox:
-            if not isinstance(tool, (BaseCaller, CallableWithSignature)):
+            if not isinstance(tool, CallableWithSignature):
                 raise TypeError(
                     f"Toolbox requires Caller or CallableWithSignature objects.  Received {tool}: {type(tool)}"
                 )

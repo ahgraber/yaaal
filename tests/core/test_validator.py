@@ -5,8 +5,9 @@ from typing import Any, Optional
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 import pytest
 
-from yaaal.core.base import BaseCaller, ValidationError
-from yaaal.core.tools import tool
+from yaaal.core.base import CallableWithSignature
+from yaaal.core.exceptions import ValidationError
+from yaaal.core.tools import Tool
 from yaaal.core.validator import (
     PassthroughValidator,
     PydanticValidator,
@@ -92,7 +93,7 @@ class TestRegexValidator:
 class TestToolValidator:
     @pytest.fixture
     def sample_tool(self):
-        @tool
+        @Tool
         def sample_tool(arg1: str, arg2: int) -> str:
             """The concatenator."""
             return arg1 + str(arg2)
@@ -129,7 +130,7 @@ class TestToolValidator:
     def test_missing_description_warns(self, caplog):
         import logging
 
-        @tool
+        @Tool
         def undocumented_tool(n: int):
             return f"This is test {n}"
 

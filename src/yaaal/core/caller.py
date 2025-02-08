@@ -28,10 +28,11 @@ from pydantic import BaseModel
 from aisuite import Client
 from openai import pydantic_function_tool as openai_pydantic_function_tool
 
-from .base import BaseCaller, ValidationError
+from .base import CallableWithSignature
+from .exceptions import ValidationError
 from .handler import CompositeHandler, ResponseHandler, ToolHandler
 from .prompt import Prompt
-from .tools import CallableWithSignature, anthropic_pydantic_function_tool
+from .tools import anthropic_pydantic_function_tool
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types.base import JSON
 from ..types.core import Conversation, ResponseMessage
@@ -40,7 +41,7 @@ from ..types.openai_compat import ChatCompletion, convert_response
 logger = logging.getLogger(__name__)
 
 
-class Caller(BaseCaller):
+class Caller(CallableWithSignature):
     """Caller implementation."""
 
     def __init__(
@@ -197,7 +198,7 @@ def create_tool_caller(
     client: Client,
     model: str,
     prompt: Prompt,
-    toolbox: list[BaseCaller | CallableWithSignature],
+    toolbox: list[CallableWithSignature],
     request_params: dict[str, JSON] | None = None,
     auto_invoke: bool = False,
 ) -> Caller:
@@ -215,7 +216,7 @@ def _make_structured_params(model: str) -> dict[str, JSON]:
     return {"response_format": {"type": "json_object"}}
 
 
-def _make_tool_params(model: str, toolbox: list[BaseCaller | CallableWithSignature]) -> dict[str, JSON]:
+def _make_tool_params(model: str, toolbox: list[CallableWithSignature]) -> dict[str, JSON]:
     """Make request params for tool use."""
     tools = [
         anthropic_pydantic_function_tool(t.signature())

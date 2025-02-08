@@ -3,7 +3,7 @@ from typing import Optional, Union
 from pydantic import BaseModel
 import pytest
 
-from yaaal.core.tools import pydantic_function_signature, respond_as_tool, tool
+from yaaal.core.tools import Tool, pydantic_function_signature
 from yaaal.types.core import ToolResultMessage
 
 
@@ -107,23 +107,23 @@ class TestFunctionSchema:
 
 class ToolResponse:
     def test_tool_response(self):
-        tm = respond_as_tool(tool_call_id="test_id", response=6)
+        tm = Tool.respond_as_tool(tool_call_id="test_id", response=6)
         assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "6"
 
-        tm = respond_as_tool(tool_call_id="test_id", response="bob")
+        tm = Tool.respond_as_tool(tool_call_id="test_id", response="bob")
         assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "bob"
 
     def test_tool_response_no_response(self):
-        tm = respond_as_tool(tool_call_id="test_id")
+        tm = Tool.respond_as_tool(tool_call_id="test_id")
         assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "null"
 
-        tm = respond_as_tool(tool_call_id="test_id", response=None)
+        tm = Tool.respond_as_tool(tool_call_id="test_id", response=None)
         assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == "null"
@@ -133,27 +133,27 @@ class ToolResponse:
             x: int
             y: str
 
-        @tool
+        @Tool
         def sample_fn(x: int, y: str) -> SampleModel:
             return SampleModel(x=x, y=y)
 
-        tm = respond_as_tool(tool_call_id="test_id", response=sample_fn(x=1, y="test"))
+        tm = Tool.respond_as_tool(tool_call_id="test_id", response=sample_fn(x=1, y="test"))
         assert isinstance(tm, ToolResultMessage)
         assert tm.tool_call_id == "test_id"
         assert tm.content == '{"x":1,"y":"test"}'
 
     def test_tool_response_with_invalid_tool_call_id(self):
         with pytest.raises(ValueError):
-            respond_as_tool(response="test")
+            Tool.respond_as_tool(response="test")
 
         with pytest.raises(ValueError):
-            respond_as_tool(tool_call_id=None, response="test")
+            Tool.respond_as_tool(tool_call_id=None, response="test")
 
 
 class TestToolDecorator:
     @pytest.fixture
     def add3(self):
-        @tool
+        @Tool
         def add3(x: int, y: int) -> int:
             return x + y + 3
 
@@ -161,7 +161,7 @@ class TestToolDecorator:
 
     @pytest.fixture
     def name3(self):
-        @tool
+        @Tool
         def name3(x: int, name: str) -> str:
             return f"{name}{x}3"
 
@@ -212,7 +212,7 @@ class TestToolDecorator:
             x: int
             y: str
 
-        @tool
+        @Tool
         def sample_fn(x: int, y: str) -> SampleModel:
             return SampleModel(x=x, y=y)
 

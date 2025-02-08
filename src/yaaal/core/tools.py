@@ -6,6 +6,7 @@ from typing import Callable, Type
 
 from pydantic import BaseModel, create_model
 
+from .base import CallableWithSignature
 from ..types.base import JSON
 from ..types.core import ToolResultMessage
 
@@ -64,26 +65,7 @@ def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
     return model
 
 
-def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:
-    """Return response as a ToolMessage."""
-    if tool_call_id is None:
-        raise ValueError("tool_call_id is required")
-
-    if isinstance(response, str):
-        responsestr = response
-    elif isinstance(response, BaseModel):
-        responsestr = response.model_dump_json()
-    else:
-        try:
-            responsestr = json.dumps(response)
-        except Exception as e:
-            logger.debug(f"Could not serialize result as json string: {e}")
-            responsestr = str(response)
-
-    return ToolResultMessage(tool_call_id=tool_call_id, content=responsestr)
-
-
-class CallableWithSignature:
+class Tool(CallableWithSignature):
     def __init__(self, f):
         self.func = f
         wraps(f)(self)
@@ -100,15 +82,29 @@ class CallableWithSignature:
         if tool_call_id is None:
             raise ValueError("tool_call_id is required")
 
-        return respond_as_tool(
+        return self.respond_as_tool(
             tool_call_id=tool_call_id,
             response=self.func(*args, **kwargs),
         )
 
+    @staticmethod
+    def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:
+        """Return response as a ToolMessage."""
+        if tool_call_id is None:
+            raise ValueError("tool_call_id is required")
 
-def tool(func: Callable) -> CallableWithSignature:
-    """Convert Callable to CallableWithSignature as decorator."""
-    return CallableWithSignature(func)
+        if isinstance(response, str):
+            responsestr = response
+        elif isinstance(response, BaseModel):
+            responsestr = response.model_dump_json()
+        else:
+            try:
+                responsestr = json.dumps(response)
+            except Exception as e:
+                logger.debug(f"Could not serialize result as json string: {e}")
+                responsestr = str(response)
+
+        return ToolResultMessage(tool_call_id=tool_call_id, content=responsestr)
 
 
 def anthropic_pydantic_function_tool(model: Type[BaseModel]) -> dict:
