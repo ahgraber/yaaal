@@ -4,7 +4,7 @@ from functools import wraps
 import inspect
 import json
 import logging
-from typing import Any, Callable, Generic, Type, TypeVar, cast, get_type_hints
+from typing import Any, Callable, Generic, Type, TypeVar, cast, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, create_model
 from typing_extensions import override, runtime_checkable
@@ -13,6 +13,7 @@ from .base import CallableReturnType, CallableWithSignature
 from .exceptions import ValidationError
 from ..types.base import JSON
 from ..types.core import ToolResultMessage
+from ..types.utils import get_union_args, is_type_annotation
 
 logger = logging.getLogger(__name__)
 
@@ -111,22 +112,24 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         if self.returns in (None, Any):
             return value
 
-        return_type = self.returns
-        if not isinstance(return_type, type):
-            raise TypeError(f"Return type hint {return_type} is not a valid type")
+        if not is_type_annotation(self.returns):
+            raise TypeError(f"Return type hint {self.returns} is not a valid type")
 
-        if isinstance(value, return_type):
-            return value
-        elif return_type in (str, int, float, bool):
-            # coerce
-            return return_type(value)
-        elif issubclass(return_type, BaseModel):
-            # validate / coerce
-            return return_type.model_validate(value)
-        else:
-            raise ValidationError(
-                f"Return value {value} of type {type(value)} does not match expected type {return_type}"
-            )
+        return_types = get_union_args(self.returns)
+        for rt in return_types:
+            effective_type = get_origin(rt) or rt
+            if isinstance(value, effective_type):
+                return value
+            if effective_type in (str, int, float, bool):
+                # Coerce basic types.
+                return cast(CallableReturnType, rt(value))
+            elif issubclass(rt, BaseModel):
+                # Validate / coerce models.
+                return cast(CallableReturnType, rt.model_validate(value))
+
+        raise ValidationError(
+            f"Return value {value} of type {type(value)} does not match expected type {return_types}"
+        )
 
     @staticmethod
     def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:

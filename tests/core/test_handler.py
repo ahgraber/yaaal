@@ -1,4 +1,6 @@
 import json
+import logging
+from typing import Callable
 
 from pydantic import BaseModel
 import pytest
@@ -202,6 +204,76 @@ class TestToolHandler:
         repair_instructions = fail_handler.repair(chat_completion_tool.choices[0].message, "Error message")
 
         assert isinstance(repair_instructions, Conversation)
+
+    # Add these new test methods after existing tests
+    def test_toolhandler_invoke_basemodel(self, chat_completion_tool):
+        class Person(BaseModel):
+            name: str
+            age: int
+
+        # customize the tool for this test
+        @tool
+        def test_tool(name: str, age: int) -> Person:
+            """Returns BaseModel"""
+            return Person(name=name, age=age)
+
+        validator = ToolValidator(toolbox=[test_tool])
+        handler = ToolHandler(validator=validator, auto_invoke=True)
+
+        result = handler.process(chat_completion_tool)
+        assert isinstance(result, BaseModel)
+        assert result.name == "Bob"
+        assert result.age == 42
+
+    def test_toolhandler_invoke_string(self, chat_completion_tool, tool_call):
+        # customize the tool for this test
+        @tool
+        def test_tool(name: str, age: int) -> str:
+            """Returns str"""
+            return "test string response"
+
+        validator = ToolValidator(toolbox=[test_tool])
+        handler = ToolHandler(validator=validator, auto_invoke=True)
+
+        result = handler.process(chat_completion_tool)
+        assert isinstance(result, str)
+        assert result == "test string response"
+
+    def test_toolhandler_invoke_serializable(self, chat_completion_tool, tool_call):
+        # customize the tool for this test
+        @tool
+        def test_tool(name: str, age: int) -> list[int]:
+            """Returns list[int] (something serializable)"""
+            return [1, 2, 3]
+
+        validator = ToolValidator(toolbox=[test_tool])
+        handler = ToolHandler(validator=validator, auto_invoke=True)
+
+        result = handler.process(chat_completion_tool)
+        assert isinstance(result, str)
+        assert result == json.dumps([1, 2, 3])
+
+    def test_toolhandler_invoke_nonserializable(self, chat_completion_tool, tool_call, caplog):
+        caplog.set_level(logging.INFO, logger="yaaal.core.handler")
+
+        # customize the tool for this test
+        @tool
+        def test_tool(name: str, age: int) -> Callable:
+            """Returns list[int] (something serializable)"""
+            return lambda x: name + str(age)  # functions are non-serializable
+
+        validator = ToolValidator(toolbox=[test_tool])
+        handler = ToolHandler(validator=validator, auto_invoke=True)
+
+        result = handler.process(chat_completion_tool)
+        logs = caplog.record_tuples
+        assert any("JSON serialization failed:" in lg[2] for lg in logs)
+
+        # Since json.dumps fails, the fallback is to return str(result)
+        assert isinstance(result, str)
+        assert result == str(
+            test_tool(**json.loads(chat_completion_tool.choices[0].message.tool_calls[0].function.arguments))
+        )
 
 
 class TestCompositeHandler:
