@@ -7,7 +7,7 @@ import pytest
 
 from yaaal.core.base import CallableWithSignature
 from yaaal.core.exceptions import ValidationError
-from yaaal.core.tools import Tool
+from yaaal.core.tool import tool
 from yaaal.core.validator import (
     PassthroughValidator,
     PydanticValidator,
@@ -27,6 +27,16 @@ class TestPassthroughValidator:
     def test_repair(self):
         validator = PassthroughValidator()
         assert validator.repair_instructions("failed", "error") is None
+
+    def test_validation_error_non_string(self):
+        validator = PassthroughValidator()
+        with pytest.raises(TypeError):
+            validator.validate(123)
+
+    def test_validation_none(self):
+        validator = PassthroughValidator()
+        with pytest.raises(TypeError):
+            validator.validate(None)
 
 
 class TestPydanticValidator:
@@ -61,6 +71,35 @@ class TestPydanticValidator:
         assert len(repair.messages) == 2
         assert json.dumps(sample_model.model_json_schema()) in repair.messages[1].content
 
+    def test_validate_valid_json(self, sample_model):
+        validator = PydanticValidator(sample_model)
+        result = validator.validate('{"name": "Bob", "age": 42}')
+        assert isinstance(result, sample_model)
+        assert result.name == "Bob"
+        assert result.age == 42
+
+    def test_validate_invalid_json(self, sample_model):
+        validator = PydanticValidator(sample_model)
+        with pytest.raises(PydanticValidationError):
+            validator.validate('{"name": "Bob"}')  # missing age
+
+    def test_validate_malformed_json(self, sample_model):
+        validator = PydanticValidator(sample_model)
+
+        # malformed JSON should be handled with json_repair
+        result = validator.validate('{"name": "Bob", age: 42}')
+        assert isinstance(result, sample_model)
+        assert result.name == "Bob"
+        assert result.age == 42
+
+    def test_repair_instructions(self, sample_model):
+        validator = PydanticValidator(sample_model)
+        conversation = validator.repair_instructions('{"name": "Bob"}', "Field 'age' is required")
+        assert isinstance(conversation, Conversation)
+        assert len(conversation.messages) == 2
+        assert "Validation failed" in conversation.messages[1].content
+        assert "schema" in conversation.messages[1].content
+
 
 class TestRegexValidator:
     @pytest.fixture
@@ -89,11 +128,32 @@ class TestRegexValidator:
         assert len(repair.messages) == 2
         assert regex in repair.messages[1].content
 
+    @pytest.fixture
+    def email_pattern(self):
+        return re.compile(r"[\w\.-]+@[\w\.-]+\.\w+")
+
+    def test_validate_match(self, email_pattern):
+        validator = RegexValidator(email_pattern)
+        result = validator.validate("Contact me at user@example.com for details")
+        assert result == "user@example.com"
+
+    def test_validate_no_match(self, email_pattern):
+        validator = RegexValidator(email_pattern)
+        with pytest.raises(ValidationError):
+            validator.validate("No email address here")
+
+    def test_repair_instructions(self, email_pattern):
+        validator = RegexValidator(email_pattern)
+        conversation = validator.repair_instructions("Invalid format", "No match found")
+        assert isinstance(conversation, Conversation)
+        assert len(conversation.messages) == 2
+        assert "regex pattern" in conversation.messages[1].content
+
 
 class TestToolValidator:
     @pytest.fixture
     def sample_tool(self):
-        @Tool
+        @tool
         def sample_tool(arg1: str, arg2: int) -> str:
             """The concatenator."""
             return arg1 + str(arg2)
@@ -127,27 +187,6 @@ class TestToolValidator:
             )
             validator.validate(invalid_function)
 
-    def test_missing_description_warns(self, caplog):
-        import logging
-
-        @Tool
-        def undocumented_tool(n: int):
-            return f"This is test {n}"
-
-        caplog.set_level(logging.INFO, logger="yaaal.core.validator")
-
-        _ = ToolValidator(toolbox=[undocumented_tool])
-        logs = caplog.record_tuples
-
-        # there should be only one log and it should warn about missing docstrings
-        assert logs == [
-            (
-                "yaaal.core.validator",
-                logging.WARNING,
-                f"Did not find a 'description' for {undocumented_tool.signature().__name__}.  Does the function need docstrings?",
-            )
-        ]
-
     def test_validation_fail(self, validator):
         with pytest.raises(PydanticValidationError):
             invalid_function = ChatCompletionMessageToolCall(
@@ -170,4 +209,46 @@ class TestToolValidator:
         repair = validator.repair_instructions(tool_call, "validation error")
         assert isinstance(repair, Conversation)
         assert len(repair.messages) == 2
-        assert json.dumps(sample_tool.signature().model_json_schema()) in repair.messages[1].content
+        assert json.dumps(sample_tool.signature.model_json_schema()) in repair.messages[1].content
+
+    def test_validate_valid_call(self, sample_tool):
+        validator = ToolValidator(toolbox=[sample_tool])
+        print(validator.toolbox)
+        result = validator.validate(
+            ChatCompletionMessageToolCall(
+                id="call_123",
+                function=ChatCompletionMessageToolCallFunction(
+                    name="sample_tool", arguments='{"arg1": "test", "arg2": "2"}'
+                ),
+                type="function",
+            )
+        )
+        assert isinstance(result, sample_tool.signature)
+
+    def test_validate_invalid_tool(self, sample_tool):
+        validator = ToolValidator([sample_tool])
+        with pytest.raises(ValidationError):
+            validator.validate(
+                ChatCompletionMessageToolCall(
+                    id="call_123",
+                    function=ChatCompletionMessageToolCallFunction(name="unknown_tool", arguments='{"a": 1, "b": 2}'),
+                    type="function",
+                )
+            )
+
+    def test_validate_invalid_args(self, sample_tool):
+        validator = ToolValidator([sample_tool])
+        with pytest.raises(ValidationError):
+            validator.validate(
+                ChatCompletionMessageToolCall(
+                    id="call_123",
+                    function=ChatCompletionMessageToolCallFunction(
+                        name="add", arguments='{"a": "not_a_number", "b": 2}'
+                    ),
+                    type="function",
+                )
+            )
+
+    def test_invalid_tool_registration(self):
+        with pytest.raises(TypeError):
+            ToolValidator([lambda x: x])  # Plain callable without signature

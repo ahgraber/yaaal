@@ -8,7 +8,7 @@ Each validator implements the BaseValidator interface with two main methods:
 
 The module supports various validation strategies including:
 - Passthrough validation (i.e., no validation)
-- Schema-based validation using Pydantic models
+- Schema-based validation using pydantic models
 - Pattern matching using regular expressions
 - Tool call validation with function signatures
 """
@@ -24,44 +24,91 @@ import json_repair
 from pydantic import BaseModel
 from typing_extensions import override
 
-from .base import Validator
+from .base import Validator, ValidatorReturnType
 from .exceptions import ValidationError
-from .tools import CallableWithSignature
+from .tool import CallableWithSignature
 from ..types.core import (
     AssistantMessage,
     Conversation,
-    ResponseMessage,
-    ToolResultMessage,
     UserMessage,
-    ValidatorResult,
 )
 from ..types.openai_compat import (
-    ChatCompletion,
-    ChatCompletionMessage,
     ChatCompletionMessageToolCall,
-    ChatCompletionMessageToolCallFunction,
-    convert_response,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class PassthroughValidator(Validator):
-    """Simple validator that passes content through unchanged."""
+class PassthroughValidator(Validator[str]):
+    """Simple validator that passes content through unchanged.
+
+    Validates that input is a string but performs no other checks.
+    Used as baseline validator or for raw text handling.
+
+    Examples
+    --------
+        >>> validator = PassthroughValidator()
+        >>> result = validator.validate("Hello")
+        >>> result
+        'Hello'
+        >>> assert result == "Hello"
+
+        Raises TypeError for non-string input:
+
+        >>> validator.validate(123)  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+            ...
+        TypeError: Expected 'str' completion, received '<class 'int'>'
+    """
 
     @override
     def validate(self, completion: str) -> str:
-        return completion
+        if isinstance(completion, str):
+            return completion
+        else:
+            raise TypeError(f"Expected 'str' completion, received '{type(completion)}'")
 
     @override
     def repair_instructions(self, completion: str, error: str) -> None:
         return None
 
 
-class PydanticValidator(Validator):
-    """Validate using Pydantic models."""
+class PydanticValidator(Validator[BaseModel]):
+    """Validate using pydantic models.
+
+    Parses JSON responses and validates against provided model schema.
+    Handles malformed JSON through repair mechanism.
+
+    Args:
+        model: Pydantic model class for validation
+
+    Examples
+    --------
+        Define and use a model:
+
+        >>> from pydantic import BaseModel
+        >>> class User(BaseModel):
+        ...     name: str
+        ...     age: int
+        >>> validator = PydanticValidator(User)
+        >>> result = validator.validate('{"name": "Bob", "age": 42}')
+        >>> isinstance(result, User)
+        True
+
+        Missing fields raise ValidationError:
+
+        >>> validator.validate('{"name": "Bob"}')  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+            ...
+        ValidationError: Input validation failed
+    """
 
     def __init__(self, model: type[BaseModel]):
+        """Initialize with validation model.
+
+        Args:
+            model: Pydantic model class defining schema
+        """
         self.model = model
 
     @override
@@ -87,10 +134,37 @@ class PydanticValidator(Validator):
         )
 
 
-class RegexValidator(Validator):
-    """Validate using regex patterns."""
+class RegexValidator(Validator[str]):
+    r"""Validate using regex patterns.
+
+    Validates text against provided regex pattern and extracts first match.
+
+    Args:
+        pattern: Compiled regex pattern for validation
+
+    Examples
+    --------
+        Match email addresses:
+
+        >>> import re
+        >>> validator = RegexValidator(re.compile(r"[\w\.-]+@[\w\.-]+\.\w+"))
+        >>> validator.validate("Contact: user@example.com")
+        'user@example.com'
+
+        Invalid input raises ValidationError:
+
+        >>> validator.validate("Invalid email")  # doctest: +IGNORE_EXCEPTION_DETAIL
+        Traceback (most recent call last):
+            ...
+        ValidationError: Response did not match expected pattern
+    """
 
     def __init__(self, pattern: Pattern):
+        """Initialize with regex pattern.
+
+        Args:
+            pattern: Compiled regex pattern
+        """
         self.pattern = pattern
 
     @override
@@ -118,10 +192,42 @@ class RegexValidator(Validator):
         )
 
 
-class ToolValidator(Validator):
-    """Validate tool calls."""
+class ToolValidator(Validator[BaseModel]):
+    """Validate tool calls against registered function signatures.
+
+    Manages toolbox of callable tools and validates calls against their schemas.
+
+    Args:
+        toolbox: List of callable tools with signatures
+
+    Examples
+    --------
+        >>> @tool
+        ... def add(a: int, b: int) -> int:
+        ...     "Add two numbers."
+        ...     return a + b
+        >>> validator = ToolValidator([add])
+        >>> result = validator.validate(
+        ...     ChatCompletionMessageToolCall(
+        ...         function=FunctionCall(
+        ...             name="add",
+        ...             arguments='{"a": 1, "b": 2}',
+        ...         )
+        ...     )
+        ... )
+        >>> isinstance(result, add.signature)
+    """
 
     def __init__(self, toolbox: list[CallableWithSignature]):
+        """Initialize with list of tools.
+
+        Args:
+            toolbox: List of callable tools with signatures
+
+        Raises
+        ------
+            TypeError: If tools lack required interfaces
+        """
         self.toolbox = toolbox
 
     @property
@@ -131,6 +237,7 @@ class ToolValidator(Validator):
 
     @toolbox.setter
     def toolbox(self, toolbox: list[CallableWithSignature]):
+        """Register list of tools by name."""
         tb = {}
         for tool in toolbox:
             if not isinstance(tool, CallableWithSignature):
@@ -138,12 +245,10 @@ class ToolValidator(Validator):
                     f"Toolbox requires Caller or CallableWithSignature objects.  Received {tool}: {type(tool)}"
                 )
 
-            if not tool.signature().__doc__:
-                logger.warning(
-                    f"Did not find a 'description' for {tool.signature().__name__}.  Does the function need docstrings?"
-                )
+            if not tool.signature.__doc__:
+                logger.warning(f"Function {tool.signature.__name__} requires docstrings for viable signature.")
             try:
-                tb[tool.signature().__name__] = tool
+                tb[tool.signature.__name__] = tool
             except Exception:
                 logger.exception(f"Error while defining toolbox entry for {str(tool)}")
                 raise
@@ -155,7 +260,7 @@ class ToolValidator(Validator):
         name = completion.function.name
         arguments = completion.function.arguments
         try:
-            return self.toolbox[name].signature().model_validate(json_repair.loads(arguments))
+            return self.toolbox[name].signature.model_validate(json_repair.loads(arguments))
         except KeyError as e:
             raise ValidationError(f"Tool {name} does not exist in toolbox") from e
 
@@ -171,7 +276,7 @@ class ToolValidator(Validator):
                         Validation failed: {error}
 
                         Update your response to match this schema for function {function.name}:
-                        {json.dumps(self.toolbox[function.name].signature().model_json_schema())}
+                        {json.dumps(self.toolbox[function.name].schema)}
                     """.strip()
                     ),
                 ),
