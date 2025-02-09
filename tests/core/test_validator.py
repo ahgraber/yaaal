@@ -153,7 +153,7 @@ class TestRegexValidator:
 class TestToolValidator:
     @pytest.fixture
     def sample_tool(self):
-        @Tool
+        @tool
         def sample_tool(arg1: str, arg2: int) -> str:
             """The concatenator."""
             return arg1 + str(arg2)
