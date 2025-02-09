@@ -2218,7 +2218,7 @@ wheels = [
 
 [[package]]
 name = "yaaal"
-version = "0b0"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "aisuite", extra = ["all"] },
