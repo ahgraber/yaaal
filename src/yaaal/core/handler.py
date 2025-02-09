@@ -118,7 +118,7 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
         if isinstance(result, BaseModel):
             # !!!NOTE!!!
             # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
-            content = json.dumps(result.model_dump())
+            return result
         elif isinstance(result, str):
             content = result
         else:
