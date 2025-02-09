@@ -15,7 +15,6 @@ from yaaal.types.base import JSON
 from yaaal.types.core import (
     AssistantMessage,
     Conversation,
-    ResponseMessage,
     ToolResultMessage,
     UserMessage,
 )
@@ -31,7 +30,7 @@ from yaaal.types.openai_compat import (
 
 @pytest.fixture
 def test_tool():
-    @Tool
+    @tool
     def test_tool(name: str, age: int) -> tuple:
         return (name, age)
 
@@ -280,7 +279,7 @@ class TestToolHandler:
 class TestCompositeHandler:
     @pytest.fixture
     def test_tool(self):
-        @Tool
+        @tool
         def test_tool(name: str, age: int) -> tuple:
             return (name, age)
 
