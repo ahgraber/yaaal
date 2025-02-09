@@ -7,16 +7,14 @@ from typing_extensions import override
 from yaaal.core.base import Validator
 from yaaal.core.exceptions import ResponseError, ValidationError
 from yaaal.core.handler import CompositeHandler, ResponseHandler, ToolHandler
-from yaaal.core.tools import Tool
+from yaaal.core.tool import tool
 from yaaal.core.validator import PassthroughValidator, ToolValidator
 from yaaal.types.base import JSON
 from yaaal.types.core import (
     AssistantMessage,
     Conversation,
-    ResponseMessage,
     ToolResultMessage,
     UserMessage,
-    ValidatorResult,
 )
 from yaaal.types.openai_compat import (
     ChatCompletion,
@@ -30,7 +28,7 @@ from yaaal.types.openai_compat import (
 
 @pytest.fixture
 def test_tool():
-    @Tool
+    @tool
     def test_tool(name: str, age: int) -> tuple:
         return (name, age)
 
@@ -136,8 +134,8 @@ class TestResponseHandler:
     def test_content_passes(self, pass_handler, content, chat_completion_content):
         result = pass_handler(chat_completion_content)
 
-        assert isinstance(result, AssistantMessage)
-        assert result.content == content
+        assert isinstance(result, str)
+        assert result == content
 
     def test_validation_fails(self, fail_handler, chat_completion_content):
         with pytest.raises(ValidationError):
@@ -179,20 +177,17 @@ class TestToolHandler:
     def test_toolcall_passes(self, pass_handler, chat_completion_tool):
         result = pass_handler(chat_completion_tool)
 
-        assert isinstance(result, AssistantMessage)
-
-        content = json.loads(result.content)
-        assert content["name"] == "Bob"
-        assert content["age"] == 42
+        assert isinstance(result, BaseModel)
+        assert result.name == "Bob"
+        assert result.age == 42
 
     def test_toolcall_invoke(self, pass_handler, chat_completion_tool, tool_call):
         pass_handler.auto_invoke = True
         assert pass_handler.auto_invoke
 
         result = pass_handler(chat_completion_tool)
-        assert isinstance(result, ToolResultMessage)
-        assert result.tool_call_id == tool_call.id
-        assert result.content == json.dumps(("Bob", 42))
+        assert isinstance(result, str)
+        assert result == json.dumps(("Bob", 42))
 
     def test_validation_fails(self, fail_handler, chat_completion_tool):
         with pytest.raises(ValidationError):
@@ -212,7 +207,7 @@ class TestToolHandler:
 class TestCompositeHandler:
     @pytest.fixture
     def test_tool(self):
-        @Tool
+        @tool
         def test_tool(name: str, age: int) -> tuple:
             return (name, age)
 
@@ -239,8 +234,8 @@ class TestCompositeHandler:
     def test_content_passes(self, pass_handler, content, chat_completion_content):
         result = pass_handler(chat_completion_content)
 
-        assert isinstance(result, AssistantMessage)
-        assert result.content == content
+        assert isinstance(result, str)
+        assert result == content
 
     def test_content_validation_fails(self, fail_handler, chat_completion_content):
         with pytest.raises(ValidationError):
@@ -249,20 +244,17 @@ class TestCompositeHandler:
     def test_toolcall_passes(self, pass_handler, chat_completion_tool):
         result = pass_handler(chat_completion_tool)
 
-        assert isinstance(result, AssistantMessage)
-
-        content = json.loads(result.content)
-        assert content["name"] == "Bob"
-        assert content["age"] == 42
+        assert isinstance(result, BaseModel)
+        assert result.name == "Bob"
+        assert result.age == 42
 
     def test_toolcall_invoke(self, pass_handler, chat_completion_tool, tool_call):
         pass_handler.tool_handler.auto_invoke = True
         assert pass_handler.tool_handler.auto_invoke
 
         result = pass_handler(chat_completion_tool)
-        assert isinstance(result, ToolResultMessage)
-        assert result.tool_call_id == tool_call.id
-        assert result.content == json.dumps(("Bob", 42))
+        assert isinstance(result, str)
+        assert result == json.dumps(("Bob", 42))
 
     def test_toolcallvalidation_fails(self, fail_handler, chat_completion_tool):
         with pytest.raises(ValidationError):

@@ -18,21 +18,22 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Never, cast
 
 from pydantic import BaseModel
 
-from .base import Handler, Validator
-from .exceptions import ResponseError, ValidationError
-from .tools import CallableWithSignature
+from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator
+from .exceptions import ResponseError
+from .tool import CallableWithSignature
 from .validator import ToolValidator
 from ..types.base import JSON
-from ..types.core import AssistantMessage, Conversation, ResponseMessage, ToolResultMessage, ValidatorResult
+from ..types.core import AssistantMessage, Conversation, UserMessage
 from ..types.openai_compat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall
 
 logger = logging.getLogger(__name__)
 
 
-class ResponseHandler(Handler):
+class ResponseHandler(Handler[ContentHandlerReturnType, Never]):
     """Handles content responses with validation."""
 
     def __init__(
@@ -52,16 +53,15 @@ class ResponseHandler(Handler):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> ResponseMessage:
+    def __call__(self, response: ChatCompletion) -> ContentHandlerReturnType:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:
             validated = self.validator.validate(msg.content)
-            return AssistantMessage(
-                # !!!NOTE!!!
-                # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
-                content=json.dumps(validated.model_dump()) if isinstance(validated, BaseModel) else validated
-            )
+            # !!!NOTE!!!
+            # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
+            # return json.dumps(validated.model_dump()) if isinstance(validated, BaseModel) else validated
+            return validated
         raise ValueError("Expected content response but received none")
 
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
@@ -71,7 +71,7 @@ class ResponseHandler(Handler):
         return self.validator.repair_instructions(message.content, error)
 
 
-class ToolHandler(Handler):
+class ToolHandler(Handler[Never, ToolHandlerReturnType]):
     """Handles tool responses with validation and optional invocation."""
 
     def __init__(
@@ -93,7 +93,7 @@ class ToolHandler(Handler):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> ResponseMessage:
+    def __call__(self, response: ChatCompletion) -> ToolHandlerReturnType:
         """Process the LLM response."""
         msg = response.choices[0].message
         if not msg.tool_calls:
@@ -105,28 +105,26 @@ class ToolHandler(Handler):
         validated = self.validator.validate(tool_call)
 
         if not self.auto_invoke:
-            # !!!NOTE!!!
-            # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
-            return AssistantMessage(content=json.dumps(validated.model_dump()))
+            return cast(ToolHandlerReturnType, validated)
 
         # Invoke tool
         logger.debug(f"Invoking {function.name}")
         tool = self.validator.toolbox[function.name]
         result = tool(**validated.model_dump())
-        if isinstance(result, ResponseMessage):
-            content = result.content
-        elif isinstance(result, BaseModel):
-            content = result.model_dump_json()
+        if isinstance(result, BaseModel):
+            # !!!NOTE!!!
+            # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
+            content = json.dumps(result.model_dump())
         elif isinstance(result, str):
             content = result
         else:
-            content = json.dumps(result)
+            try:
+                content = json.dumps(result)
+            except (TypeError, ValueError) as e:
+                logger.warning(f"JSON serialization failed: {e}")
+                content = str(result)
 
-        # NOTE: The handler returns a ToolResultMessage if invocation succeeds
-        #       which may result in adding ToolResultMessage to the Conversation
-        #       without the corresponding prior ChatCompletionToolCall
-        # TODO: Is this a problem?
-        return ToolResultMessage(tool_call_id=tool_call.id, content=content)
+        return cast(ToolHandlerReturnType, content)
 
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
         """Generate repair instructions for invalid response."""
@@ -135,16 +133,20 @@ class ToolHandler(Handler):
         return self.validator.repair_instructions(message.tool_calls[0], error)
 
 
-class CompositeHandler(Handler):
+class CompositeHandler(Handler[ContentHandlerReturnType, ToolHandlerReturnType]):
     """Handles both content and tool responses."""
 
     max_repair_attempts: None  # managed by sub-handlers
 
-    def __init__(self, content_handler: ResponseHandler, tool_handler: ToolHandler):
+    def __init__(
+        self,
+        content_handler: ResponseHandler[ContentHandlerReturnType],
+        tool_handler: ToolHandler[ToolHandlerReturnType],
+    ):
         self.content_handler = content_handler or None
         self.tool_handler = tool_handler or None
 
-    def __call__(self, response: ChatCompletion) -> ResponseMessage:
+    def __call__(self, response: ChatCompletion) -> ContentHandlerReturnType | ToolHandlerReturnType:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:
