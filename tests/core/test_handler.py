@@ -132,14 +132,14 @@ class TestResponseHandler:
         assert isinstance(pass_handler.validator, PassthroughValidator)
 
     def test_content_passes(self, pass_handler, content, chat_completion_content):
-        result = pass_handler(chat_completion_content)
+        result = pass_handler.process(chat_completion_content)
 
         assert isinstance(result, str)
         assert result == content
 
     def test_validation_fails(self, fail_handler, chat_completion_content):
         with pytest.raises(ValidationError):
-            fail_handler(chat_completion_content)
+            fail_handler.process(chat_completion_content)
 
     def test_content_repair(self, fail_handler, chat_completion_content):
         repair_instructions = fail_handler.repair(chat_completion_content.choices[0].message, "Error message")
@@ -148,7 +148,7 @@ class TestResponseHandler:
 
     def test_toolcall_fails(self, pass_handler, chat_completion_tool):
         with pytest.raises(ValueError):
-            pass_handler(chat_completion_tool)
+            pass_handler.process(chat_completion_tool)
 
     def test_toolcall_repair(self, fail_handler, chat_completion_tool):
         repair_instructions = fail_handler.repair(chat_completion_tool.choices[0].message, "Error message")
@@ -172,10 +172,10 @@ class TestToolHandler:
 
     def test_content_fails(self, pass_handler, chat_completion_content):
         with pytest.raises(ValueError):
-            pass_handler(chat_completion_content)
+            pass_handler.process(chat_completion_content)
 
     def test_toolcall_passes(self, pass_handler, chat_completion_tool):
-        result = pass_handler(chat_completion_tool)
+        result = pass_handler.process(chat_completion_tool)
 
         assert isinstance(result, BaseModel)
         assert result.name == "Bob"
@@ -185,13 +185,13 @@ class TestToolHandler:
         pass_handler.auto_invoke = True
         assert pass_handler.auto_invoke
 
-        result = pass_handler(chat_completion_tool)
+        result = pass_handler.process(chat_completion_tool)
         assert isinstance(result, str)
         assert result == json.dumps(("Bob", 42))
 
     def test_validation_fails(self, fail_handler, chat_completion_tool):
         with pytest.raises(ValidationError):
-            fail_handler(chat_completion_tool)
+            fail_handler.process(chat_completion_tool)
 
     def test_content_repair(self, fail_handler, chat_completion_content):
         repair_instructions = fail_handler.repair(chat_completion_content.choices[0].message, "Error message")
@@ -232,17 +232,17 @@ class TestCompositeHandler:
         assert isinstance(pass_handler.tool_handler, ToolHandler)
 
     def test_content_passes(self, pass_handler, content, chat_completion_content):
-        result = pass_handler(chat_completion_content)
+        result = pass_handler.process(chat_completion_content)
 
         assert isinstance(result, str)
         assert result == content
 
     def test_content_validation_fails(self, fail_handler, chat_completion_content):
         with pytest.raises(ValidationError):
-            fail_handler(chat_completion_content)
+            fail_handler.process(chat_completion_content)
 
     def test_toolcall_passes(self, pass_handler, chat_completion_tool):
-        result = pass_handler(chat_completion_tool)
+        result = pass_handler.process(chat_completion_tool)
 
         assert isinstance(result, BaseModel)
         assert result.name == "Bob"
@@ -252,17 +252,17 @@ class TestCompositeHandler:
         pass_handler.tool_handler.auto_invoke = True
         assert pass_handler.tool_handler.auto_invoke
 
-        result = pass_handler(chat_completion_tool)
+        result = pass_handler.process(chat_completion_tool)
         assert isinstance(result, str)
         assert result == json.dumps(("Bob", 42))
 
     def test_toolcallvalidation_fails(self, fail_handler, chat_completion_tool):
         with pytest.raises(ValidationError):
-            fail_handler(chat_completion_tool)
+            fail_handler.process(chat_completion_tool)
 
     def test_refusal(self, pass_handler):
         with pytest.raises(ResponseError):
-            pass_handler(
+            pass_handler.process(
                 ChatCompletion(
                     choices=[
                         ChatCompletionChoice(
@@ -278,7 +278,7 @@ class TestCompositeHandler:
 
     def test_message_error(self, pass_handler):
         with pytest.raises(ResponseError):
-            pass_handler(
+            pass_handler.process(
                 ChatCompletion(
                     choices=[
                         ChatCompletionChoice(

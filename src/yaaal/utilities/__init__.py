@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import textwrap
@@ -43,6 +44,10 @@ def to_snake_case(text: str) -> str:
 
     # Convert to lowercase
     return text.lower()
+
+
+def now_utc() -> datetime:
+    return datetime.now(tz=timezone.utc)
 
 
 def detect_encoding(rawdata: bytes) -> str:

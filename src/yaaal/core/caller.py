@@ -6,7 +6,7 @@ A Caller associates a Prompt with a specific LLM client and call parameters (ass
 This allows every Caller instance to use a different model and/or parameters, and sets expectations for the Caller instance.
 Whereas `Prompts` validate _inputs_ to the template and `Handlers` validate the LLM responses, `Callers` make it all happen.
 
-Additionally, Callers can be used as functions/tools in tool-calling workflows by leveraging Caller.signature() which provides the inputs the Caller's Prompt requires as a JSON schema.
+Additionally, Callers can be used as functions/tools in tool-calling workflows by leveraging Caller.schema which provides the inputs the Caller's Prompt requires as a JSON schema.
 Since a Caller has a specific client and model assigned, this effectively allows us to use Callers to route to specific models for specific use cases.
 Since Callers can behave as functions themselves, we enable complex workflows where Callers can call Callers (ad infinitum ad nauseum).
 
@@ -14,79 +14,89 @@ Simple factory functions create Callers where the use case is defined by their h
 
 - `ChatCaller`: a simple Caller implementation designed for chat messages without response validation.
 - `RegexCaller`: uses regex for response validation.
-- `StructuredCaller`:  is intended for structured responses, and uses Pydantic for response validation.
+- `StructuredCaller`:  is intended for structured responses, and uses pydantic for response validation.
 - `ToolCaller`: a configuration for tool-use; can optionally invoke the tool based on arguments in the LLM's response and return the function results.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Type
+from typing import Generic, Type, cast, get_type_hints
 
 from pydantic import BaseModel
+from typing_extensions import override, runtime_checkable
 
 from aisuite import Client
 from openai import pydantic_function_tool as openai_pydantic_function_tool
 
-from .base import CallableWithSignature
+from .base import CallableReturnType, CallableWithSignature
 from .exceptions import ValidationError
 from .handler import CompositeHandler, ResponseHandler, ToolHandler
 from .prompt import Prompt
-from .tools import anthropic_pydantic_function_tool
+from .tool import anthropic_pydantic_function_tool
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types.base import JSON
-from ..types.core import Conversation, ResponseMessage
+from ..types.core import Conversation
 from ..types.openai_compat import ChatCompletion, convert_response
 
 logger = logging.getLogger(__name__)
 
 
-class Caller(CallableWithSignature):
-    """Caller implementation."""
+class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnType]):
+    """Executes LLM requests with validation and error recovery.
+
+    Manages the full lifecycle of LLM interactions including:
+    - Message construction from prompts
+    - API request handling
+    - Response validation
+    - Automatic repair attempts
+    - Tool execution (if configured)
+
+    Args:
+        client (Client): OpenAI-compatible API client
+        model (str): Model identifier (e.g. "gpt-4")
+        prompt (Prompt): Template for message construction
+        handler (Union[ResponseHandler, ToolHandler, CompositeHandler]): Response processor
+        request_params (Optional[dict[str, JSON]]): Additional API parameters
+        max_repair_attempts (int, optional): Max validation retries. Defaults to 2.
+
+    Attributes
+    ----------
+        signature (Type[BaseModel]): Pydantic model for call parameters
+        schema (JSON): JSON schema for call parameters
+        returns (CallableReturnType): Return type annotation
+        request_params (dict): OpenAI API parameters
+
+    Raises
+    ------
+        ValidationError: If response fails validation
+        ResponseError: If max repair attempts exceeded
+    """
 
     def __init__(
         self,
         client: Client,
         model: str,
         prompt: Prompt,
-        handler: ResponseHandler | ToolHandler | CompositeHandler,
+        handler: ResponseHandler[CallableReturnType]
+        | ToolHandler
+        | CompositeHandler[CallableReturnType, BaseModel | str],
         request_params: dict[str, JSON] | None = None,
         max_repair_attempts: int = 2,
     ):
-        self._client = client
-        self._model = model
-        self._prompt = prompt
+        self.client = client
+        self.model = model
+        self.prompt = prompt
         self.handler = handler
-        self.request_params = self._make_request_params(request_params)
         self.max_repair_attempts = max_repair_attempts
 
-    @property
-    def client(self) -> Client:
-        """Client called for every execution of the Caller instance."""
-        return self._client
+        self.signature = self.prompt.signature
+        self.schema = self.signature.model_json_schema()
+        self.returns: Type[CallableReturnType] | None = get_type_hints(
+            self.__class__.__call__, self.__class__.__call__.__globals__
+        ).get("return")
 
-    @client.setter
-    def client(self, client: Client):
-        self._client = client
-
-    @property
-    def model(self) -> str:
-        """Model called for every execution of the Caller instance."""
-        return self._model
-
-    @model.setter
-    def model(self, model: str):
-        self._model = model
-        logger.debug(f"All API requests for {self.__class__.__name__} will use model : {self._model}")
-
-    @property
-    def prompt(self) -> Prompt:
-        """Prompt used to construct messages arrays."""
-        return self._prompt
-
-    @prompt.setter
-    def prompt(self, prompt: Prompt):
-        self._prompt = prompt
+        self.request_params = self._make_request_params(request_params)
 
     @property
     def request_params(self) -> dict[str, JSON]:
@@ -104,22 +114,13 @@ class Caller(CallableWithSignature):
             raise ValueError("'model' should be set separately")
         return params
 
-    @property
-    def max_repair_attempts(self) -> int:
-        """Maximum number of retries for validation failures."""
-        return self._max_repair_attempts
-
-    @max_repair_attempts.setter
-    def max_repair_attempts(self, max_repair_attempts: int):
-        self._max_repair_attempts = max_repair_attempts
-
     def __call__(
         self,
         *,
         system_vars: dict | None = None,
         user_vars: dict | None = None,
         conversation: Conversation | None = None,
-    ) -> ResponseMessage:
+    ) -> CallableReturnType | BaseModel | str:
         """Call the API."""
         rendered = self.prompt.render(system_vars=system_vars, user_vars=user_vars)
         if conversation:
@@ -141,10 +142,10 @@ class Caller(CallableWithSignature):
 
     def _handle_with_repair(
         self, conversation: Conversation, response: ChatCompletion, repair_attempt: int = 0
-    ) -> ResponseMessage:
+    ) -> CallableReturnType | BaseModel | str:
         """Handle response with repair attempts."""
         try:
-            return self.handler(response)
+            return self.handler.process(response)
         except Exception as e:
             if repair_attempt >= self.max_repair_attempts:
                 raise ValidationError("Max repair attempts reached") from e
@@ -159,14 +160,6 @@ class Caller(CallableWithSignature):
             conversation.messages.extend(repair_prompt.messages)
             new_response = self._chat_completions_create(conversation)
             return self._handle_with_repair(conversation, new_response, repair_attempt + 1)
-
-    def signature(self) -> Type[BaseModel]:
-        """Provide the Caller's function signature.
-
-        It seems weird that the signature is defined in the Prompt when the Caller is "callable",
-        but the Prompt defines the signature requirements whereas the Caller is just a wrapper to generate the request.
-        """
-        return self.prompt.signature()
 
 
 # Factory functions
@@ -219,12 +212,13 @@ def _make_structured_params(model: str) -> dict[str, JSON]:
 def _make_tool_params(model: str, toolbox: list[CallableWithSignature]) -> dict[str, JSON]:
     """Make request params for tool use."""
     tools = [
-        anthropic_pydantic_function_tool(t.signature())
+        anthropic_pydantic_function_tool(t.signature)
         if "anthropic" in model
-        else openai_pydantic_function_tool(t.signature())
+        else openai_pydantic_function_tool(t.signature)
         for t in toolbox
     ]
 
+    tools = cast(JSON, tools)
     if "anthropic" in model:
         return {"tools": tools, "tool_choice": {"type": "auto"}}
     return {"tools": tools, "tool_choice": "auto"}

@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Never, cast
+from typing import Generic
 
 from pydantic import BaseModel
+from typing_extensions import override, runtime_checkable
 
-from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator
+from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator, ValidatorReturnType
 from .exceptions import ResponseError
 from .tool import CallableWithSignature
 from .validator import ToolValidator
@@ -33,12 +34,12 @@ from ..types.openai_compat import ChatCompletion, ChatCompletionMessage, ChatCom
 logger = logging.getLogger(__name__)
 
 
-class ResponseHandler(Handler[ContentHandlerReturnType, Never]):
+class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerReturnType, None]):
     """Handles content responses with validation."""
 
     def __init__(
         self,
-        validator: Validator,
+        validator: Validator[ContentHandlerReturnType],
         max_repair_attempts: int = 2,
     ):
         self.validator = validator
@@ -53,7 +54,8 @@ class ResponseHandler(Handler[ContentHandlerReturnType, Never]):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> ContentHandlerReturnType:
+    @override
+    def process(self, response: ChatCompletion) -> ContentHandlerReturnType:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:
@@ -64,6 +66,7 @@ class ResponseHandler(Handler[ContentHandlerReturnType, Never]):
             return validated
         raise ValueError("Expected content response but received none")
 
+    @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
         """Generate repair instructions for invalid response."""
         if not message.content:
@@ -71,7 +74,7 @@ class ResponseHandler(Handler[ContentHandlerReturnType, Never]):
         return self.validator.repair_instructions(message.content, error)
 
 
-class ToolHandler(Handler[Never, ToolHandlerReturnType]):
+class ToolHandler(Handler[None, ToolHandlerReturnType]):
     """Handles tool responses with validation and optional invocation."""
 
     def __init__(
@@ -93,7 +96,8 @@ class ToolHandler(Handler[Never, ToolHandlerReturnType]):
     def max_repair_attempts(self, max_repair_attempts: int):
         self._max_repair_attempts = max_repair_attempts
 
-    def __call__(self, response: ChatCompletion) -> ToolHandlerReturnType:
+    @override
+    def process(self, response: ChatCompletion) -> BaseModel | str:
         """Process the LLM response."""
         msg = response.choices[0].message
         if not msg.tool_calls:
@@ -105,7 +109,7 @@ class ToolHandler(Handler[Never, ToolHandlerReturnType]):
         validated = self.validator.validate(tool_call)
 
         if not self.auto_invoke:
-            return cast(ToolHandlerReturnType, validated)
+            return validated
 
         # Invoke tool
         logger.debug(f"Invoking {function.name}")
@@ -124,8 +128,9 @@ class ToolHandler(Handler[Never, ToolHandlerReturnType]):
                 logger.warning(f"JSON serialization failed: {e}")
                 content = str(result)
 
-        return cast(ToolHandlerReturnType, content)
+        return content
 
+    @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
         """Generate repair instructions for invalid response."""
         if not message.tool_calls:
@@ -133,7 +138,9 @@ class ToolHandler(Handler[Never, ToolHandlerReturnType]):
         return self.validator.repair_instructions(message.tool_calls[0], error)
 
 
-class CompositeHandler(Handler[ContentHandlerReturnType, ToolHandlerReturnType]):
+class CompositeHandler(
+    Generic[ContentHandlerReturnType, ToolHandlerReturnType], Handler[ContentHandlerReturnType, ToolHandlerReturnType]
+):
     """Handles both content and tool responses."""
 
     max_repair_attempts: None  # managed by sub-handlers
@@ -141,23 +148,25 @@ class CompositeHandler(Handler[ContentHandlerReturnType, ToolHandlerReturnType])
     def __init__(
         self,
         content_handler: ResponseHandler[ContentHandlerReturnType],
-        tool_handler: ToolHandler[ToolHandlerReturnType],
+        tool_handler: ToolHandler,
     ):
         self.content_handler = content_handler or None
         self.tool_handler = tool_handler or None
 
-    def __call__(self, response: ChatCompletion) -> ContentHandlerReturnType | ToolHandlerReturnType:
+    @override
+    def process(self, response: ChatCompletion) -> ContentHandlerReturnType | BaseModel | str:
         """Process the LLM response."""
         msg = response.choices[0].message
         if msg.content:
-            return self.content_handler(response)
+            return self.content_handler.process(response)
         elif msg.tool_calls:
-            return self.tool_handler(response)
+            return self.tool_handler.process(response)
         elif msg.refusal:
             raise ResponseError(f"Received refusal {msg.refusal}")
         else:
             raise ResponseError("Could not identify message type")
 
+    @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
         """Generate repair instructions for invalid response."""
         if message.content:

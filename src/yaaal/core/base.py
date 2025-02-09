@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, Type, Union
+from typing import Generic, Protocol, Type, Union
 
 from pydantic import BaseModel
-from typing_extensions import TypeVar, runtime_checkable
+from typing_extensions import TypeAlias, TypeVar, runtime_checkable
 
 from .prompt import Prompt
 from ..types.base import JSON
@@ -19,14 +19,14 @@ from ..types.openai_compat import (
 
 logger = logging.getLogger(__name__)
 
-ValidatorReturnType = TypeVar("ValidatorReturnType", bound=Union[str, BaseModel], covariant=True)
-ContentHandlerReturnType = TypeVar("ContentHandlerReturnType", bound=Union[str, BaseModel], covariant=True)
-ToolHandlerReturnType = TypeVar("ToolHandlerReturnType", bound=BaseModel, covariant=True)
+ValidatorReturnType = TypeVar("ValidatorReturnType", covariant=True)
+ContentHandlerReturnType = TypeVar("ContentHandlerReturnType", covariant=True)
+ToolHandlerReturnType = TypeVar("ToolHandlerReturnType", bound=Union[BaseModel, str, None], covariant=True)
 CallableReturnType = TypeVar("CallableReturnType", covariant=False)
 
 
 @runtime_checkable
-class Validator(Protocol[ValidatorReturnType]):
+class Validator(Generic[ValidatorReturnType], Protocol):
     """Base protocol for all validators."""
 
     def validate(self, completion: str | ChatCompletionMessageToolCall) -> ValidatorReturnType:
@@ -39,13 +39,13 @@ class Validator(Protocol[ValidatorReturnType]):
 
 
 @runtime_checkable
-class Handler(Protocol[ContentHandlerReturnType, ToolHandlerReturnType]):
+class Handler(Generic[ContentHandlerReturnType, ToolHandlerReturnType], Protocol):
     """Protocol for response handlers."""
 
     max_repair_attempts: int
     """Maximum number of times to retry validation."""
 
-    def __call__(self, response: ChatCompletion) -> ContentHandlerReturnType | ToolHandlerReturnType:
+    def process(self, response: ChatCompletion) -> ContentHandlerReturnType | ToolHandlerReturnType:
         """Process the LLM response."""
         ...
 
@@ -55,7 +55,7 @@ class Handler(Protocol[ContentHandlerReturnType, ToolHandlerReturnType]):
 
 
 @runtime_checkable
-class CallableWithSignature(Protocol[CallableReturnType]):
+class CallableWithSignature(Generic[CallableReturnType], Protocol):
     """Base protocol for Callables with signature.
 
     Attributes
@@ -67,7 +67,7 @@ class CallableWithSignature(Protocol[CallableReturnType]):
 
     signature: Type[BaseModel]
     schema: JSON
-    returns: CallableReturnType
+    returns: Type[CallableReturnType]
 
     def __call__(self, *args, **kwargs) -> CallableReturnType:
         """Execute the operation."""

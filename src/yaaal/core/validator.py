@@ -22,7 +22,7 @@ from typing import Pattern
 
 import json_repair
 from pydantic import BaseModel
-from typing_extensions import override
+from typing_extensions import override, runtime_checkable
 
 from .base import Validator, ValidatorReturnType
 from .exceptions import ValidationError

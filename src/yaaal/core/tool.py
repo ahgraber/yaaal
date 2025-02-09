@@ -89,13 +89,15 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         Expected return type annotation
     """
 
-    def __init__(self, func: Callable[..., Any], returns: Type[CallableReturnType] | None = None) -> None:
+    def __init__(
+        self, func: Callable[..., CallableReturnType], returns: Type[CallableReturnType] | None = None
+    ) -> None:
         self._func = func
         self.returns: Type[CallableReturnType] | None = returns or get_type_hints(func).get("return")
         self.signature = pydantic_function_signature(func)
         self.schema = self.signature.model_json_schema()
 
-        # treat tool as func
+        # treat Tool instance as func
         self.__name__ = self.signature.__name__
         self.__doc__ = self.signature.__doc__
 
@@ -105,7 +107,7 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         return self.validate_return_type(result)
 
     def validate_return_type(self, value: Any) -> CallableReturnType:
-        """Validate (and convert, if necessary) to specified return type."""
+        """Validate (and coerce) to specified return type."""
         if self.returns in (None, Any):
             return value
 
@@ -116,9 +118,11 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         if isinstance(value, return_type):
             return value
         elif return_type in (str, int, float, bool):
+            # coerce
             return return_type(value)
         elif issubclass(return_type, BaseModel):
-            return cast(CallableReturnType, return_type.model_validate(value))
+            # validate / coerce
+            return return_type.model_validate(value)
         else:
             raise ValidationError(
                 f"Return value {value} of type {type(value)} does not match expected type {return_type}"
@@ -144,7 +148,9 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         return ToolResultMessage(tool_call_id=tool_call_id, content=responsestr)
 
 
-def tool(func: Callable[..., Any] | None = None, *, returns: Type[Any] | None = None):
+def tool(
+    func: Callable[..., CallableReturnType] | None = None, *, returns: Type[Any] | None = None
+) -> Callable[..., Tool[CallableReturnType]]:
     """Decorate a function into a Tool instance for type validation.
 
     Can be used either as a bare decorator (@tool) or with parameters (@tool(returns=type)).
