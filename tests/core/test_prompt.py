@@ -97,7 +97,7 @@ class TestStringMessageTemplate:
             template.render_message(template_vars=invalid_vars)
 
     def test_extra_template_vars(self, template):
-        # whether extra vars are permitted is a template_vars_model setting in the Pydantic BaseModel
+        # whether extra vars are permitted is a template_vars_model setting in the pydantic BaseModel
         # TODO: In the future, consider whether a MessageTemplate should mandate "extra='forbid'"
         pass
 
@@ -200,7 +200,7 @@ class TestJinjaMessageTemplate:
             t.render_message(template_vars=invalid_vars)
 
     def test_extra_template_vars(self, template):
-        # whether extra vars are permitted is a template_vars_model setting in the Pydantic BaseModel
+        # whether extra vars are permitted is a template_vars_model setting in the pydantic BaseModel
         # TODO: In the future, consider whether a MessageTemplate should mandate "extra='forbid'"
         pass
 
@@ -235,6 +235,41 @@ class TestJinjaMessageTemplate:
         message = t.render_message(template_vars=template_vars)
         assert message.role == "user"
         assert message.content == "Hi, my name is Bob and I'm 42 years old."
+
+    def test_init_with_jinja_template(self):
+        template = JinjaTemplate("Hello {{name}}", undefined=StrictUndefined)
+        t = JinjaMessageTemplate(role="user", template=template)
+        assert t.template == template
+        assert t.template.environment.undefined == StrictUndefined
+
+    def test_init_with_string(self):
+        t = JinjaMessageTemplate(role="user", template="Hello {{name}}")
+        assert isinstance(t.template, JinjaTemplate)
+        assert t.template.environment.undefined == StrictUndefined
+
+    def test_complex_template_rendering(self):
+        template = """
+        {% for item in items %}
+        - {{item.name}}: {{item.value}}
+        {% endfor %}
+        Total: {{total}}
+        """
+
+        class Item(BaseModel):
+            name: str
+            value: int
+
+        class TemplateVars(BaseModel):
+            items: list[Item]
+            total: int
+
+        t = JinjaMessageTemplate(role="user", template=template, template_vars_model=TemplateVars)
+
+        template_vars = {"items": [{"name": "A", "value": 1}, {"name": "B", "value": 2}], "total": 3}
+        msg = t.render_message(template_vars)
+        assert "- A: 1" in msg.content
+        assert "- B: 2" in msg.content
+        assert "Total: 3" in msg.content
 
 
 class TestPrompt:
@@ -324,7 +359,7 @@ class TestPrompt:
             description="A test prompt",
             system_template=StaticMessageTemplate(role="system", template="You are a helpful assistant."),
         )
-        signature = prompt.signature()
+        signature = prompt.signature
         assert issubclass(signature, BaseModel)
 
         schema = signature.model_json_schema()
@@ -333,28 +368,31 @@ class TestPrompt:
         assert schema["description"] in prompt.description
 
     def test_signature_template_system_no_user(self):
+        with pytest.raises(ValueError):
+            # no system_template.template_vars_model
+            Prompt(
+                name="Test Prompt",
+                description="A test prompt",
+                system_template=StringMessageTemplate(
+                    role="system",
+                    template="You are a helpful assistant who specializes in $topic.",
+                ),
+            )
+
         prompt = Prompt(
             name="Test Prompt",
             description="A test prompt",
             system_template=StringMessageTemplate(
                 role="system",
-                template="You are a helpful assistant who specializes in {topic}.",
-            ),
-        )
-        # no system_template.template_vars_model
-        with pytest.raises(ValueError):
-            signature = prompt.signature()
-
-        prompt.system_template = StringMessageTemplate(
-            role="system",
-            template="You are a helpful assistant who specializes in {topic}.",
-            template_vars_model=create_model(
-                "system_vars",
-                topic=(str, ...),  # template var 'topic' must be str
+                template="You are a helpful assistant who specializes in $topic.",
+                template_vars_model=create_model(
+                    "system_vars",
+                    topic=(str, ...),  # template var 'topic' must be str
+                ),
             ),
         )
 
-        signature = prompt.signature()
+        signature = prompt.signature
         assert issubclass(signature, BaseModel)
 
         schema = signature.model_json_schema()
@@ -371,7 +409,7 @@ class TestPrompt:
             system_template=StaticMessageTemplate(role="system", template="You are a helpful assistant."),
             user_template=StaticMessageTemplate(role="user", template="Hi, who are you?"),
         )
-        signature = prompt.signature()
+        signature = prompt.signature
         assert issubclass(signature, BaseModel)
 
         schema = signature.model_json_schema()
@@ -386,7 +424,7 @@ class TestPrompt:
             system_template=StaticMessageTemplate(role="system", template="You are a helpful assistant."),
             user_template=PassthroughMessageTemplate(),
         )
-        signature = prompt.signature()
+        signature = prompt.signature
         assert issubclass(signature, BaseModel)
 
         schema = signature.model_json_schema()
@@ -448,7 +486,7 @@ class TestPrompt:
             user_template=PassthroughMessageTemplate(),
         )
 
-        signature = prompt.signature()
+        signature = prompt.signature
         assert issubclass(signature, BaseModel)
 
         schema = signature.model_json_schema()
@@ -465,3 +503,80 @@ class TestPrompt:
         assert (len(schema["$defs"]["PassthroughModel"]["properties"]) == 1) and (
             "content" in schema["$defs"]["PassthroughModel"]["properties"]
         )
+
+    def test_invalid_system_template(self):
+        with pytest.raises(ValueError):
+            Prompt(
+                name="Test",
+                description="Test",
+                system_template=StringMessageTemplate(
+                    role="system",
+                    template="Hello $name",
+                    # Missing template_vars_model
+                ),
+            )
+
+    def test_invalid_user_template(self):
+        with pytest.raises(ValueError):
+            Prompt(
+                name="Test",
+                description="Test",
+                system_template=StaticMessageTemplate(role="system", template="Static system"),
+                user_template=StringMessageTemplate(
+                    role="user",
+                    template="Hello $name",
+                    # Missing template_vars_model
+                ),
+            )
+
+    def test_schema_with_complex_types(self):
+        class SourceData(BaseModel):
+            url: str
+            content: str
+            metadata: dict[str, str]
+
+        class SystemVars(BaseModel):
+            sources: list[SourceData]
+            max_length: int
+
+        class UserVars(BaseModel):
+            query: str
+            filters: list[str]
+
+        prompt = Prompt(
+            name="Complex Prompt",
+            description="Test complex schema generation",
+            system_template=JinjaMessageTemplate(
+                role="system", template="Process {{sources|length}} sources", template_vars_model=SystemVars
+            ),
+            user_template=JinjaMessageTemplate(
+                role="user", template="Query: {{query}}\nFilters: {{filters|join(', ')}}", template_vars_model=UserVars
+            ),
+        )
+
+        schema = prompt.schema
+        assert "SystemVars" in schema["$defs"]
+        assert "UserVars" in schema["$defs"]
+        assert "SourceData" in schema["$defs"]
+        assert set(schema["required"]) == {"system_vars", "user_vars"}
+
+    def test_render_with_model_input(self):
+        class SystemVars(BaseModel):
+            mode: str
+
+        class UserVars(BaseModel):
+            query: str
+
+        prompt = Prompt(
+            name="Test",
+            description="Test",
+            system_template=JinjaMessageTemplate(
+                role="system", template="Mode: {{mode}}", template_vars_model=SystemVars
+            ),
+            user_template=JinjaMessageTemplate(role="user", template="Query: {{query}}", template_vars_model=UserVars),
+        )
+
+        conv = prompt.render(system_vars=SystemVars(mode="test"), user_vars=UserVars(query="hello"))
+        assert len(conv.messages) == 2
+        assert conv.messages[0].content == "Mode: test"
+        assert conv.messages[1].content == "Query: hello"
