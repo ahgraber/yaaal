@@ -4,8 +4,6 @@ import logging
 from typing import Annotated, Any, Union
 
 from pydantic import (
-    BaseModel,
-    Field,
     ValidationError,
     ValidationInfo,
     ValidatorFunctionWrapHandler,

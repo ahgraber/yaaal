@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import logging
-from typing import Literal
+from typing import Literal, TypeAlias, Union
 
 from pydantic import (
     BaseModel,
@@ -9,8 +8,6 @@ from pydantic import (
 )
 
 from ..utilities import format_json
-
-logger = logging.getLogger(__name__)
 
 Role = Literal["assistant", "system", "tool", "user"]
 
@@ -23,7 +20,23 @@ class Message(BaseModel):
         return format_json(self.model_dump())
 
 
-class ToolMessage(Message):
+# These messages are for composing Conversations (i.e., inputs to the LLM)
+class SystemMessage(Message):
+    role: Literal["system"] = "system"
+    # content: str = Field(description="The contents of the message.", min_length=1)
+
+
+class UserMessage(Message):
+    role: Literal["user"] = "user"
+    # content: str = Field(description="The contents of the message.", min_length=1)
+
+
+class AssistantMessage(Message):
+    role: Literal["assistant"] = "assistant"
+    # content: str = Field(description="The contents of the message.", min_length=1)
+
+
+class ToolResultMessage(Message):
     role: Literal["tool"] = "tool"
     content: str = Field(description="The result of the tool call.")
     tool_call_id: str = Field(description="The tool_call.id that requested this response")

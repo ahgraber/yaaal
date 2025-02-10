@@ -6,7 +6,7 @@ A list of Messages is a Conversation, which provides easy conversion to a messag
 
 Sometimes we may want to predefine the messages in the conversation via MessageTemplates.
 A MessageTemplate defines the role, the template, and the rendering method to generate a Message.
-It may also add variable validation with Pydantic through the template_vars_model attribute.
+It may also add variable validation with pydantic through the template_vars_model attribute.
 
 StaticMessageTemplate provides a prompt template that is not templated, that is,
 there are no template variables and it renders exactly the same string every time.
@@ -37,38 +37,26 @@ logger = logging.getLogger(__name__)
 
 
 class MessageTemplate:
-    """Base class for rendering a Message."""
+    """Base class for rendering a Message.
 
-    _role: Role
-    _template: str
-    _template_vars_model: Type[BaseModel] | None
+    Defines interface for converting templates and variables into Messages.
+    Subclasses implement specific templating engines.
 
-    @property
-    def role(self) -> Role:
-        """Role used in Message."""
-        return self._role
+    Attributes
+    ----------
+        role: Role used in rendered Message (system/user/assistant)
+        template: Template defining message content structure
+        template_vars_model: Optional Pydantic model for variable validation
+    """
 
-    @role.setter
-    def role(self, role: Role):
-        self._role = role
+    role: Role
+    """Role used in Message."""
 
-    @property
-    def template(self) -> Any:
-        """Template that defines the message content for each render."""
-        return self._template
+    template: Any
+    """Template that defines the message content for each render."""
 
-    @template.setter
-    def template(self, template: Any):
-        self._template = template
-
-    @property
-    def template_vars_model(self) -> Type[BaseModel] | None:
-        """Template that defines the message content for each render."""
-        return self._template_vars_model
-
-    @template_vars_model.setter
-    def template_vars_model(self, template_vars_model: Type[BaseModel] | None):
-        self._template_vars_model = template_vars_model
+    template_vars_model: Type[BaseModel] | None
+    """Template that defines the message content for each render."""
 
     @abstractmethod
     def render_message(self, template_vars: dict[str, Any] | BaseModel) -> Message:
@@ -77,7 +65,21 @@ class MessageTemplate:
 
 
 class StaticMessageTemplate(MessageTemplate):
-    """Render static messages."""
+    """Render static messages.
+
+    Used for constant system messages or fixed responses.
+    Ignores any template variables passed during rendering.
+
+    Args:
+        role: Message role (system/user/assistant)
+        template: Static message content
+
+    Examples
+    --------
+        >>> template = StaticMessageTemplate(role="system", template="You are a helpful assistant.")
+        >>> msg = template.render_message()  # Variables optional
+        >>> assert msg.content == "You are a helpful assistant."
+    """
 
     def __init__(self, role: Role, template: str):
         self.role = role
@@ -91,17 +93,28 @@ class StaticMessageTemplate(MessageTemplate):
 
 
 class StringMessageTemplate(MessageTemplate):
-    """Render with template strings.
+    """Render with Python's string.Template.
 
-    Uses template strings, not format strings (variables denoted by '$varname', not '{varname}').
+    Uses template strings with $-based substitution:
+    - Variables denoted by $varname or ${varname}
+    - Optional Pydantic validation of variables
+    - Strict variable substitution (raises KeyError for missing vars)
 
-    Roughly equivalent to:
-    >>> template = "Hi, my name is $name and I'm $age years old."
-    >>> template_vars = {"name": "Bob", "age": 42}
-    >>> return template.substitute(template_vars)
+    Args:
+        role: Message role (system/user/assistant)
+        template: Template string using $-based substitution
+        template_vars_model: Optional Pydantic model for validation
+
+    Examples
+    --------
+        >>> class UserVars(BaseModel):
+        ...     name: str
+        ...     age: int
+        >>> template = StringMessageTemplate(
+        ...     role="user", template="Name: $name, Age: $age", template_vars_model=UserVars
+        ... )
+        >>> msg = template.render_message({"name": "Bob", "age": 42})
     """
-
-    _template: StringTemplate
 
     def __init__(
         self,
@@ -142,13 +155,22 @@ class StringMessageTemplate(MessageTemplate):
 class PassthroughMessageTemplate(StringMessageTemplate):
     """Render message by passing content through.
 
-    Useful for defining Prompts where the user input is needed.
-    Always has a 'user' role. Automatically creates the appropriate 'template_vars_model'.
+    Simplifies creating prompts that need raw user input by:
+    - Enforcing 'user' role
+    - Creating model with 'content' field
+    - Using simple string substitution
 
-    Pass template_vars as follows:
-    >>> template = "$content"
-    >>> template_vars = {"content": "Hi, my name is Bob and I'm 42 years old.}
-    >>> return template.substitute(template_vars)
+    Args:
+        role: Always 'user' (enforced)
+        template: Always '$content' (enforced)
+        template_vars_model: Ignored, auto-generated
+
+    Examples
+    --------
+        >>> template = PassthroughMessageTemplate()
+        >>> msg = template.render_message({"content": "Hello!"})
+        >>> assert msg.content == "Hello!"
+        >>> assert msg.role == "user"
     """
 
     def __init__(
@@ -165,15 +187,28 @@ class PassthroughMessageTemplate(StringMessageTemplate):
 
 
 class JinjaMessageTemplate(MessageTemplate):
-    """Render with jinja2 templates.
+    """Jinja2 template renderer.
 
-    Roughly equivalent to:
-    >>> template = JinjaTemplate("Hi, my name is {{name}} and I'm {{age}} years old.")
-    >>> template_vars = {"name": "Bob", "age": 42}
-    >>> return template.render(**template_vars)
+    Provides Jinja2 templating with optional Pydantic validation.
+    Uses StrictUndefined to catch missing variables.
+
+    Args:
+        role (Role): Message role (system/user/assistant)
+        template (str | JinjaTemplate): Template string or Jinja template
+        template_vars_model (Type[BaseModel] | None): Pydantic model for variables
+
+    Examples
+    --------
+        >>> class UserVars(BaseModel):
+        ...     name: str
+        ...     age: int
+        >>> template = JinjaMessageTemplate(
+        ...     role="user",
+        ...     template="Hi, I'm {{name}}, {{age}} years old",
+        ...     template_vars_model=UserVars,
+        ... )
+        >>> msg = template.render_message({"name": "Bob", "age": 42})
     """
-
-    _template: JinjaTemplate
 
     def __init__(
         self,
@@ -204,7 +239,7 @@ class JinjaMessageTemplate(MessageTemplate):
 
     @override
     def render_message(self, template_vars: dict[str, Any] | BaseModel) -> Message:
-        """Render the system message."""
+        """Render the message."""
         vars_ = template_vars if isinstance(template_vars, dict) else template_vars.model_dump()
 
         # If no template_vars_model, render w/o validation
@@ -220,7 +255,17 @@ class JinjaMessageTemplate(MessageTemplate):
 class Prompt:
     """Prompt objects define how to render messages.
 
-    A system message/template is required; user message/templates are optional.
+    Manages system and user message templates for LLM interactions.
+    Provides parameter validation and JSON schema generation.
+
+    Attributes
+    ----------
+        name (str): Prompt name; Used as function name when defining signature
+        description (str): Human readable description; used as function docstring
+        system_template (MessageTemplate): Required system message template
+        user_template (MessageTemplate | None): Optional user message template
+        signature (Type[BaseModel]): Pydantic model for parameters
+        schema (JSON): OpenAPI-compatible schema
     """
 
     def __init__(
@@ -230,22 +275,13 @@ class Prompt:
         system_template: MessageTemplate,
         user_template: MessageTemplate | None = None,
     ):
-        self.name = name
+        self.name = to_snake_case(name)
         self.description = description
         self.system_template = system_template
         self.user_template = user_template
 
-    @property
-    def name(self) -> str:
-        """Prompt name.
-
-        Used as function name when defining signature to treat prompt as a tool.
-        """
-        return self._name
-
-    @name.setter
-    def name(self, name: str):
-        self._name = to_snake_case(name)
+        self.signature = self._get_signature()
+        self.schema = self.signature.model_json_schema()
 
     def __repr__(self):
         return f"{self.__class__.__name__}(name={self.name})"
@@ -256,7 +292,20 @@ class Prompt:
         system_vars: dict[str, Any] | BaseModel | None = None,
         user_vars: dict[str, Any] | BaseModel | None = None,
     ) -> Conversation:
-        """Render the conversation / messages array."""
+        """Render the conversation / messages array.
+
+        Args:
+            system_vars: Variables for system template
+            user_vars: Variables for user template
+
+        Returns
+        -------
+            Conversation with rendered messages
+
+        Raises
+        ------
+            ValidationError: If variables fail validation
+        """
         messages = [
             # always require a system message
             self.system_template.render_message(system_vars or {}),
@@ -266,26 +315,32 @@ class Prompt:
 
         return Conversation(messages=messages)
 
-    def signature(self) -> Type[BaseModel]:
-        """Provide function signature as json schema."""
+    def _get_signature(self) -> Type[BaseModel]:
+        """Define function signature as pydantic model."""
         field_definitions = {}
 
-        if not isinstance(self.system_template, StaticMessageTemplate):
-            if not self.system_template.template_vars_model:
-                raise ValueError("No system template model provided; cannot define signature.")
-            field_definitions["system_vars"] = (
-                self.system_template.template_vars_model,
-                ...,
-            )  # .model_json_schema() | {"title": None}
-
-        if not isinstance(self.user_template, StaticMessageTemplate):
-            if self.user_template and self.user_template.template_vars_model:
-                field_definitions["user_vars"] = (
-                    self.user_template.template_vars_model,
+        if isinstance(self.system_template, StaticMessageTemplate):
+            pass
+        else:
+            if self.system_template.template_vars_model:
+                field_definitions["system_vars"] = (
+                    self.system_template.template_vars_model,
                     ...,
                 )  # .model_json_schema() | {"title": None}
-            if self.user_template and not self.user_template.template_vars_model:
-                raise ValueError("User template exists without user template model; cannot define signature.")
+            else:
+                raise ValueError("No system template model provided; cannot define signature.")
+
+        if self.user_template:
+            if isinstance(self.user_template, StaticMessageTemplate):
+                pass
+            else:
+                if self.user_template.template_vars_model:
+                    field_definitions["user_vars"] = (
+                        self.user_template.template_vars_model,
+                        ...,
+                    )
+                else:
+                    raise ValueError("User template exists without user template model; cannot define signature.")
 
         model = create_model(self.name, __doc__=self.description, **field_definitions)
 
