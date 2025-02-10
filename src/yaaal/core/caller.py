@@ -1,5 +1,7 @@
 """Components for composable LLM calls.
 
+A Caller is the basic structure that wraps all logic required for LLM call-and-response.
+
 A Caller executes LLM requests with enhanced response validation and automatic error recovery.
 It manages message construction via a ConversationTemplate, performs API calls with a specified client,
 and validates responses using associated handlers (which may include tool execution).
@@ -101,6 +103,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
     @property
     def request_params(self) -> dict[str, JSON]:
+        """Request parameters used for every execution."""
         """Request parameters used for every execution."""
         return self._request_params
 

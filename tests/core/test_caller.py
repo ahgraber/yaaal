@@ -8,6 +8,7 @@ from pydantic import BaseModel, create_model
 import pytest
 
 from aisuite import Client
+from aisuite.framework import ChatCompletionResponse
 
 from yaaal.core.caller import Caller, create_chat_caller, create_structured_caller, create_tool_caller
 from yaaal.core.exceptions import ValidationError
