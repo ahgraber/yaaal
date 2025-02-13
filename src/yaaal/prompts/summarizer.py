@@ -1,9 +1,9 @@
 from pydantic import BaseModel, Field
 
-from ..core.prompt import (
+from ..core.template import (
+    ConversationTemplate,
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
-    Prompt,
     StringMessageTemplate,
 )
 from ..tools.web import URLContent
@@ -52,13 +52,16 @@ class SummarizerUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to focus the analysis")
 
 
-summarizer_prompt = Prompt(
+summarizer_prompt = ConversationTemplate(
     name="Summarizer",
     description="Generate a summary of provided content",
-    system_template=JinjaMessageTemplate(
-        role="system",
-        template=summarizer_prompt_template,
-        template_vars_model=SummarizerSystemVars,
-    ),
-    user_template=PassthroughMessageTemplate(),
+    templates=[
+        JinjaMessageTemplate(
+            name="System Instructions",
+            role="system",
+            template=summarizer_prompt_template,
+            validation_model=SummarizerSystemVars,
+        ),
+        PassthroughMessageTemplate(name="User request"),
+    ],
 )
