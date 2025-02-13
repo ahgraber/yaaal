@@ -1,9 +1,9 @@
 from pydantic import BaseModel, Field
 
-from ..core.prompt import (
+from ..core.template import (
+    ConversationTemplate,
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
-    Prompt,
     StringMessageTemplate,
 )
 from ..tools.web import URLContent
@@ -87,13 +87,16 @@ class ExtractorUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to focus the analysis")
 
 
-extractor_prompt = Prompt(
+extractor_template = ConversationTemplate(
     name="Extractor",
     description="Extract information from provided content",
-    system_template=JinjaMessageTemplate(
-        role="system",
-        template=extractor_prompt_template,
-        template_vars_model=ExtractorSystemVars,
-    ),
-    user_template=PassthroughMessageTemplate(),
+    templates=[
+        JinjaMessageTemplate(
+            name="System Instructions",
+            role="system",
+            template=extractor_prompt_template,
+            validation_model=ExtractorSystemVars,
+        ),
+        PassthroughMessageTemplate(name="User request"),
+    ],
 )

@@ -2,10 +2,10 @@ from pydantic import BaseModel, Field
 
 from .extractor import Extract
 from .summarizer import Summary
-from ..core.prompt import (
+from ..core.template import (
+    ConversationTemplate,
     JinjaMessageTemplate,
     PassthroughMessageTemplate,
-    Prompt,
     StringMessageTemplate,
 )
 from ..tools.web import URLContent
@@ -68,13 +68,16 @@ class MemoWriterUserVars(BaseModel):
     guidance: str = Field(description="The user guidance to direct the draft")
 
 
-memowriter_prompt = Prompt(
+memowriter_prompt = ConversationTemplate(
     name="Memo Writer",
     description="Generate a summary of provided content",
-    system_template=JinjaMessageTemplate(
-        role="system",
-        template=MemoWriter_prompt_template,
-        template_vars_model=MemoWriterSystemVars,
-    ),
-    user_template=PassthroughMessageTemplate(),
+    templates=[
+        JinjaMessageTemplate(
+            name="System Instructions",
+            role="system",
+            template=MemoWriter_prompt_template,
+            validation_model=MemoWriterSystemVars,
+        ),
+        PassthroughMessageTemplate(name="User request"),
+    ],
 )
