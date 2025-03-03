@@ -1,17 +1,11 @@
 """Components for composable LLM calls.
 
-A Handler processes LLM responses.
-Whereas `Prompts` validate _inputs_ to the template, `Handlers` validate the LLM responses.
-
-This involves recognizing content vs tool response types, validating the response with the requisite Validator, and returning a Message object to continue the conversation.
-If a tool-call instruction is detected, the Handler can try to `invoke` that call and return the function result as the response.
-
-This module provides the following handlers:
-- ResponseHandler: Handles and validates content-based responses.
-- ToolHandler: Processes tool calls with validation and optional invocation.
-- CompositeHandler: Combines functionality of both content and tool handlers.
-
-The handlers work with ChatCompletion responses and implement the BaseHandler interface.
+Handlers process LLM responses by validating and optionally repairing them.
+They distinguish between content messages and tool call messages, invoking the appropriate validation logic.
+This module provides:
+- ResponseHandler: For handling plain text responses.
+- ToolHandler: For processing tool calls with validation and optional function execution.
+- CompositeHandler: Combines both approaches to handle mixed responses.
 """
 
 from __future__ import annotations
@@ -35,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerReturnType, None]):
-    """Handles content responses with validation."""
+    """Handles plain text responses from the LLM with validation.
+
+    Uses a configured validator to process a text response and, if necessary, generate repair instructions.
+    """
 
     def __init__(
         self,
@@ -47,7 +44,7 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
 
     @property
     def max_repair_attempts(self) -> int:
-        """Client called for every execution of the Caller instance."""
+        """Return the maximum number of repair attempts allowed."""
         return self._max_repair_attempts
 
     @max_repair_attempts.setter
@@ -56,7 +53,16 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
 
     @override
     def process(self, response: ChatCompletion) -> ContentHandlerReturnType:
-        """Process the LLM response."""
+        """Extract and validate the content message from the LLM response.
+
+        Returns
+        -------
+            The validated response content.
+
+        Raises
+        ------
+            ValueError: If no content is found in the response.
+        """
         msg = response.choices[0].message
         if msg.content:
             validated = self.validator.validate(msg.content)
@@ -68,14 +74,22 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
 
     @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
-        """Generate repair instructions for invalid response."""
+        """Generate repair instructions for an invalid text response.
+
+        Returns
+        -------
+            A Conversation with repair instructions or None if no content is available.
+        """
         if not message.content:
             return None
         return self.validator.repair_instructions(message.content, error)
 
 
 class ToolHandler(Handler[None, ToolHandlerReturnType]):
-    """Handles tool responses with validation and optional invocation."""
+    """Handles tool call responses from the LLM with validation and optional execution.
+
+    If auto_invoke is enabled, the tool is automatically invoked with validated arguments.
+    """
 
     def __init__(
         self,
@@ -89,7 +103,7 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
 
     @property
     def max_repair_attempts(self) -> int:
-        """Client called for every execution of the Caller instance."""
+        """Return the maximum number of repair attempts allowed for tool calls."""
         return self._max_repair_attempts
 
     @max_repair_attempts.setter
@@ -98,7 +112,19 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
 
     @override
     def process(self, response: ChatCompletion) -> BaseModel | str:
-        """Process the LLM response."""
+        """Extract and validate a tool call from the LLM response.
+
+        If auto_invoke is enabled, call the corresponding tool with validated arguments.
+        Otherwise, simply return the validated tool arguments.
+
+        Returns
+        -------
+            The valid tool response or the result from the tool invocation.
+
+        Raises
+        ------
+            ValueError: If no tool call was found in the response.
+        """
         msg = response.choices[0].message
         if not msg.tool_calls:
             raise ValueError("Expected tool call but received none")
@@ -132,7 +158,12 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
 
     @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
-        """Generate repair instructions for invalid response."""
+        """Generate repair instructions for an invalid tool call response.
+
+        Returns
+        -------
+            A Conversation with instructions to correct the tool call, or None if no tool call is found.
+        """
         if not message.tool_calls:
             return None
         return self.validator.repair_instructions(message.tool_calls[0], error)
@@ -141,7 +172,10 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
 class CompositeHandler(
     Generic[ContentHandlerReturnType, ToolHandlerReturnType], Handler[ContentHandlerReturnType, ToolHandlerReturnType]
 ):
-    """Handles both content and tool responses."""
+    """Handles responses that may be either plain text or tool calls.
+
+    Delegates processing to either the ResponseHandler or the ToolHandler depending on the message content.
+    """
 
     max_repair_attempts: None  # managed by sub-handlers
 
@@ -155,7 +189,16 @@ class CompositeHandler(
 
     @override
     def process(self, response: ChatCompletion) -> ContentHandlerReturnType | BaseModel | str:
-        """Process the LLM response."""
+        """Determine the type of the LLM response and delegate processing accordingly.
+
+        Returns
+        -------
+            The validated and processed response from either handler.
+
+        Raises
+        ------
+            ResponseError: If the message type cannot be determined.
+        """
         msg = response.choices[0].message
         if msg.content:
             return self.content_handler.process(response)
@@ -168,7 +211,12 @@ class CompositeHandler(
 
     @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
-        """Generate repair instructions for invalid response."""
+        """Delegate repair instruction generation based on the message type.
+
+        Returns
+        -------
+            A Conversation with repair instructions, or None if not applicable.
+        """
         if message.content:
             return self.content_handler.repair(message, error)
         elif message.tool_calls:
