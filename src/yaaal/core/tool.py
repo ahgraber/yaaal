@@ -19,9 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
-    """Generate a pydantic model that represents a function's signature.
+    """Generate a Pydantic model representing a function's signature.
 
-    Extracts type hints and default values. Ignores 'self' and 'cls' for methods.
+    Extracts type hints and default values (ignoring 'self' and 'cls')
+    to create a model for validating input parameters.
     Requires type hints and docstrings for accurate schema.
     Ref:
       - https://medium.com/@wangxj03/schema-generation-for-llm-function-calling-5ab29cecbd49
@@ -78,16 +79,16 @@ def pydantic_function_signature(fn: Callable) -> Type[BaseModel]:
 
 class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType]):
     """
-    Wraps a callable to provide type information and schema validation.
+    Wrap a callable to provide type validation and generate an OpenAPI-compatible JSON schema.
 
     Attributes
     ----------
     signature : Type[BaseModel]
-        Pydantic model for validating input parameters
+        Pydantic model for validating input parameters.
     schema : dict
-        OpenAPI-compatible JSON schema of the parameters
+        OpenAPI-compatible JSON schema of the parameters.
     returns : Type[CallableReturnType] | None
-        Expected return type annotation
+        Expected return type annotation.
     """
 
     def __init__(
@@ -103,12 +104,16 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
         self.__doc__ = self.signature.__doc__
 
     def __call__(self, *args: Any, **kwargs: Any) -> CallableReturnType:
-        """Invoke the function."""
+        """Invoke the wrapped function and validate its return type."""
         result = self._func(*args, **kwargs)
         return self.validate_return_type(result)
 
     def validate_return_type(self, value: Any) -> CallableReturnType:
-        """Validate (and coerce) to specified return type."""
+        """Validate (and coerce) to specified return type.
+
+        Checks if the value matches the type specified in 'returns' and attempts to convert it for basic types
+        or validate it for Pydantic models.
+        """
         if self.returns in (None, Any):
             return value
 
@@ -133,7 +138,10 @@ class Tool(Generic[CallableReturnType], CallableWithSignature[CallableReturnType
 
     @staticmethod
     def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:
-        """Return response as a ToolMessage."""
+        """Convert a response into a ToolResultMessage for tool output.
+
+        Serializes the response into a JSON string if needed, ensuring it can be consumed as a tool result.
+        """
         if tool_call_id is None:
             raise ValueError("tool_call_id is required")
 
@@ -208,7 +216,10 @@ def tool(
 
 
 def anthropic_pydantic_function_tool(model: Type[BaseModel]) -> dict:
-    """Convert pydantic model to Anthropic-formatted tool spec."""
+    """Convert a Pydantic model into an Anthropic-compatible tool specification.
+
+    Formats the tool schema using the Anthropic interface to enable function calling.
+    """
     import openai
 
     schema = openai.pydantic_function_tool(model)

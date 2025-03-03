@@ -1,3 +1,11 @@
+"""Core protocols for composable LLM calls.
+
+This module defines the base protocols for validators, response handlers, and callables with signatures.
+Validators check and potentially repair LLM responses.
+Handlers process the responses using the validators.
+Callables expose a typed interface via a Pydantic model for input validation.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -6,7 +14,6 @@ from typing import Generic, Protocol, Type, Union
 from pydantic import BaseModel
 from typing_extensions import TypeAlias, TypeVar, runtime_checkable
 
-from .prompt import Prompt
 from ..types.base import JSON
 from ..types.core import Conversation, Message
 from ..types.openai_compat import (
@@ -27,42 +34,105 @@ CallableReturnType = TypeVar("CallableReturnType", covariant=False)
 
 @runtime_checkable
 class Validator(Generic[ValidatorReturnType], Protocol):
-    """Base protocol for all validators."""
+    """Protocol for validators that check LLM responses and provide repair instructions.
+
+    Validators implement:
+      - validate(): To verify and possibly transform an LLM response.
+      - repair_instructions(): To generate guidance as a Conversation if the response is invalid.
+    """
 
     def validate(self, completion: str | ChatCompletionMessageToolCall) -> ValidatorReturnType:
-        """Validate response."""
+        """Validate a provided completion.
+
+        Parameters
+        ----------
+        completion : str or ChatCompletionMessageToolCall
+            The LLM response to be validated.
+
+        Returns
+        -------
+        ValidatorReturnType
+            The validated (and possibly transformed) response.
+        """
         ...
 
     def repair_instructions(self, failed_content: str, error: str) -> Conversation | None:
-        """Generate repair instructions when validation fails."""
+        """Generate repair instructions for an invalid response.
+
+        Parameters
+        ----------
+        failed_content : str
+            The response content that failed validation.
+        error : str
+            The error message describing the validation failure.
+
+        Returns
+        -------
+        Conversation or None
+            A Conversation containing repair instructions, or None if not applicable.
+        """
         ...
 
 
 @runtime_checkable
 class Handler(Generic[ContentHandlerReturnType, ToolHandlerReturnType], Protocol):
-    """Protocol for response handlers."""
+    """Protocol for processing LLM responses with validation and repair steps.
+
+    Handlers determine how to extract, validate, and possibly repair responses received from the LLM.
+
+    Attributes
+    ----------
+    max_repair_attempts : int
+        The maximum number of times to attempt a repair before failing.
+    """
 
     max_repair_attempts: int
-    """Maximum number of times to retry validation."""
 
     def process(self, response: ChatCompletion) -> ContentHandlerReturnType | ToolHandlerReturnType:
-        """Process the LLM response."""
+        """Process an LLM response.
+
+        Parameters
+        ----------
+        response : ChatCompletion
+            The response obtained from the LLM.
+
+        Returns
+        -------
+        ContentHandlerReturnType or ToolHandlerReturnType
+            The processed and validated result.
+        """
         ...
 
     def repair(self, message: Message, error: str) -> Conversation | None:
-        """Generate repair instructions for invalid response."""
+        """Generate repair instructions based on an invalid response.
+
+        Parameters
+        ----------
+        message : Message
+            The invalid response message.
+        error : str
+            The error that triggered the repair.
+
+        Returns
+        -------
+        Conversation or None
+            A Conversation containing the repair steps, or None if repair is not possible.
+        """
         ...
 
 
 @runtime_checkable
 class CallableWithSignature(Generic[CallableReturnType], Protocol):
-    """Base protocol for Callables with signature.
+    """Protocol for callables that expose a Pydantic validated signature.
 
     Attributes
     ----------
-        signature (Type[BaseModel]): Pydantic model defining callable parameters
-        schema (JSON): Provide the callable's signature as JSON schema
-        returns (Type[CallableReturnType]): Return type annotation
+    signature : Type[BaseModel]
+        A Pydantic model that defines the structure and types of input parameters.
+    schema : JSON
+        A JSON schema derived from the signature for external validation.
+    returns : Type[CallableReturnType]
+        The type that the callable is expected to return.
     """
 
     signature: Type[BaseModel]
@@ -70,5 +140,18 @@ class CallableWithSignature(Generic[CallableReturnType], Protocol):
     returns: Type[CallableReturnType]
 
     def __call__(self, *args, **kwargs) -> CallableReturnType:
-        """Execute the operation."""
+        """Execute the callable with validated inputs.
+
+        Parameters
+        ----------
+        *args :
+            Positional arguments.
+        **kwargs :
+            Keyword arguments.
+
+        Returns
+        -------
+        CallableReturnType
+            The result of executing the callable.
+        """
         ...

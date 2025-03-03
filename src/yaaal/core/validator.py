@@ -1,16 +1,10 @@
-"""Components for composable LLM calls.
+"""Validation components for LLM responses.
 
-A Validator ensures the LLM response matches our expectations and provides retry/repair instructions in case the validation fails.
-
-Each validator implements the BaseValidator interface with two main methods:
-- validate(): Validates the completion/response
-- repair_instructions(): Generates instructions for fixing validation failures
-
-The module supports various validation strategies including:
-- Passthrough validation (i.e., no validation)
-- Schema-based validation using pydantic models
-- Pattern matching using regular expressions
-- Tool call validation with function signatures
+Validators ensure that LLM responses match expected formats and provide mechanisms for repair.
+Each validator implements methods to:
+- validate(): Check and/or transform the response.
+- repair_instructions(): Generate guidance to fix invalid responses.
+Supports simple passthrough, schema-based (Pydantic) validation, regex pattern matching, and tool call validation.
 """
 
 from __future__ import annotations
@@ -40,25 +34,19 @@ logger = logging.getLogger(__name__)
 
 
 class PassthroughValidator(Validator[str]):
-    """Simple validator that passes content through unchanged.
+    """A validator that returns the input unchanged if it is a string.
 
-    Validates that input is a string but performs no other checks.
-    Used as baseline validator or for raw text handling.
+    This validator performs minimal checking and is useful as a baseline or for raw text responses.
 
     Examples
     --------
-        >>> validator = PassthroughValidator()
-        >>> result = validator.validate("Hello")
-        >>> result
-        'Hello'
-        >>> assert result == "Hello"
+    >>> validator = PassthroughValidator()
+    >>> validator.validate("Hello")
+    'Hello'
 
-        Raises TypeError for non-string input:
-
-        >>> validator.validate(123)  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        TypeError: Expected 'str' completion, received '<class 'int'>'
+    Raises
+    ------
+        TypeError: If the input is not a string.
     """
 
     @override
@@ -74,40 +62,34 @@ class PassthroughValidator(Validator[str]):
 
 
 class PydanticValidator(Validator[BaseModel]):
-    """Validate using pydantic models.
+    """A validator that uses a Pydantic model to parse and verify JSON responses.
 
-    Parses JSON responses and validates against provided model schema.
-    Handles malformed JSON through repair mechanism.
+    Attempts to fix common JSON formatting issues using a repair mechanism.
 
     Args:
-        model: Pydantic model class for validation
+        model: A Pydantic model class defining the expected schema.
 
     Examples
     --------
-        Define and use a model:
+    >>> from pydantic import BaseModel
+    >>> class User(BaseModel):
+    ...     name: str
+    ...     age: int
+    >>> validator = PydanticValidator(User)
+    >>> result = validator.validate('{"name": "Bob", "age": 42}')
+    >>> isinstance(result, User)
+    True
 
-        >>> from pydantic import BaseModel
-        >>> class User(BaseModel):
-        ...     name: str
-        ...     age: int
-        >>> validator = PydanticValidator(User)
-        >>> result = validator.validate('{"name": "Bob", "age": 42}')
-        >>> isinstance(result, User)
-        True
-
-        Missing fields raise ValidationError:
-
-        >>> validator.validate('{"name": "Bob"}')  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        ValidationError: Input validation failed
+    Raises
+    ------
+        ValidationError: If the input fails to match the model schema.
     """
 
     def __init__(self, model: type[BaseModel]):
-        """Initialize with validation model.
+        """Initialize the Pydantic validation model.
 
         Args:
-            model: Pydantic model class defining schema
+            model: Pydantic model class defining the schema.
         """
         self.model = model
 
@@ -123,11 +105,10 @@ class PydanticValidator(Validator[BaseModel]):
                 UserMessage(
                     content=textwrap.dedent(
                         f"""
-                Validation failed: {error}
-
-                Please update your response to match this schema:
-                {json.dumps(self.model.model_json_schema())}
-                """.strip()
+                        Validation failed: {error}
+                        Please update your response to conform to this schema:
+                        {json.dumps(self.model.model_json_schema())}
+                        """.strip()
                     ),
                 ),
             ]
@@ -135,35 +116,30 @@ class PydanticValidator(Validator[BaseModel]):
 
 
 class RegexValidator(Validator[str]):
-    r"""Validate using regex patterns.
+    r"""A validator that extracts a substring matching a regex pattern.
 
-    Validates text against provided regex pattern and extracts first match.
+    Uses a compiled regex to search the text and returns the first match.
 
     Args:
-        pattern: Compiled regex pattern for validation
+        pattern: A compiled regular expression to match against the response.
 
     Examples
     --------
-        Match email addresses:
+    >>> import re
+    >>> validator = RegexValidator(re.compile(r"[\w\.-]+@[\w\.-]+\.\w+"))
+    >>> validator.validate("Email: user@example.com")
+    'user@example.com'
 
-        >>> import re
-        >>> validator = RegexValidator(re.compile(r"[\w\.-]+@[\w\.-]+\.\w+"))
-        >>> validator.validate("Contact: user@example.com")
-        'user@example.com'
-
-        Invalid input raises ValidationError:
-
-        >>> validator.validate("Invalid email")  # doctest: +IGNORE_EXCEPTION_DETAIL
-        Traceback (most recent call last):
-            ...
-        ValidationError: Response did not match expected pattern
+    Raises
+    ------
+        ValidationError: If no match is found.
     """
 
     def __init__(self, pattern: Pattern):
-        """Initialize with regex pattern.
+        """Initialize with a regex pattern.
 
         Args:
-            pattern: Compiled regex pattern
+            pattern: Compiled regex pattern used for matching.
         """
         self.pattern = pattern
 
@@ -182,10 +158,9 @@ class RegexValidator(Validator[str]):
                 UserMessage(
                     content=textwrap.dedent(
                         f"""
-                    Response must match the following regex pattern: {self.pattern.pattern}
-
-                    Update your response to ensure it is valid.
-                    """.strip()
+                        The response must match the regex pattern: {self.pattern.pattern}
+                        Please adjust your response accordingly.
+                        """.strip()
                     ),
                 ),
             ]
@@ -193,51 +168,51 @@ class RegexValidator(Validator[str]):
 
 
 class ToolValidator(Validator[BaseModel]):
-    """Validate tool calls against registered function signatures.
+    """A validator for tool calls that verifies function arguments against registered tool schemas.
 
-    Manages toolbox of callable tools and validates calls against their schemas.
+    Manages a toolbox of callable tools and validates their call arguments.
 
     Args:
-        toolbox: List of callable tools with signatures
+        toolbox: A list of callable tools that implement a signature for validation.
 
     Examples
     --------
-        >>> @tool
-        ... def add(a: int, b: int) -> int:
-        ...     "Add two numbers."
-        ...     return a + b
-        >>> validator = ToolValidator([add])
-        >>> result = validator.validate(
-        ...     ChatCompletionMessageToolCall(
-        ...         function=FunctionCall(
-        ...             name="add",
-        ...             arguments='{"a": 1, "b": 2}',
-        ...         )
-        ...     )
-        ... )
-        >>> isinstance(result, add.signature)
+    >>> @tool
+    ... def add(a: int, b: int) -> int:
+    ...     "Add two numbers."
+    ...     return a + b
+    >>> validator = ToolValidator([add])
+    >>> result = validator.validate(
+    ...     ChatCompletionMessageToolCall(function=FunctionCall(name="add", arguments='{"a": 1, "b": 2}'))
+    ... )
+    >>> isinstance(result, add.signature)
+    True
+
+    Raises
+    ------
+        ValidationError: If the tool name is not found or the arguments are invalid.
     """
 
     def __init__(self, toolbox: list[CallableWithSignature]):
-        """Initialize with list of tools.
+        """Initialize the ToolValidator with a toolbox of callable tools.
 
         Args:
-            toolbox: List of callable tools with signatures
+            toolbox: List of tool callables to validate against.
 
         Raises
         ------
-            TypeError: If tools lack required interfaces
+            TypeError: If any tool does not adhere to the required interface.
         """
         self.toolbox = toolbox
 
     @property
     def toolbox(self) -> dict[str, CallableWithSignature]:
-        """Available tools."""
+        """Return the registered toolbox of tools."""
         return self._toolbox
 
     @toolbox.setter
     def toolbox(self, toolbox: list[CallableWithSignature]):
-        """Register list of tools by name."""
+        """Register tools by mapping their names to the callable."""
         tb = {}
         for tool in toolbox:
             if not isinstance(tool, CallableWithSignature):
@@ -250,13 +225,25 @@ class ToolValidator(Validator[BaseModel]):
             try:
                 tb[tool.signature.__name__] = tool
             except Exception:
-                logger.exception(f"Error while defining toolbox entry for {str(tool)}")
+                logger.exception(f"Error while registering toolbox entry for {str(tool)}")
                 raise
         self._toolbox = tb
 
     @override
     def validate(self, completion: ChatCompletionMessageToolCall) -> BaseModel:
-        """Validate tool call."""
+        """Validate a tool call by matching its name and validating its arguments.
+
+        Args:
+            completion: The tool call message from the LLM.
+
+        Returns
+        -------
+            A Pydantic model instance representing the validated arguments.
+
+        Raises
+        ------
+            ValidationError: If the tool name is not found or the arguments fail to validate.
+        """
         name = completion.function.name
         arguments = completion.function.arguments
         try:
@@ -266,6 +253,16 @@ class ToolValidator(Validator[BaseModel]):
 
     @override
     def repair_instructions(self, completion: ChatCompletionMessageToolCall, error: str) -> Conversation:
+        """Generate repair instructions for an invalid tool call.
+
+        Args:
+            completion: The original tool call message.
+            error: The validation error message.
+
+        Returns
+        -------
+            A Conversation with instructions for correcting the tool call.
+        """
         function = completion.function
         return Conversation(
             messages=[
@@ -274,10 +271,9 @@ class ToolValidator(Validator[BaseModel]):
                     content=textwrap.dedent(
                         f"""
                         Validation failed: {error}
-
-                        Update your response to match this schema for function {function.name}:
+                        Please update your response to conform to the following schema for function '{function.name}':
                         {json.dumps(self.toolbox[function.name].schema)}
-                    """.strip()
+                        """.strip()
                     ),
                 ),
             ]
