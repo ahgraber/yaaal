@@ -203,6 +203,9 @@ class ToolValidator(Validator[BaseModel]):
         ------
             TypeError: If any tool does not adhere to the required interface.
         """
+        # Add a check for an empty toolbox if needed
+        if not toolbox:
+            logger.warning("ToolValidator initialized with an empty toolbox")
         self.toolbox = toolbox
 
     @property
@@ -216,12 +219,12 @@ class ToolValidator(Validator[BaseModel]):
         tb = {}
         for tool in toolbox:
             if not isinstance(tool, CallableWithSignature):
-                raise TypeError(
-                    f"Toolbox requires Caller or CallableWithSignature objects.  Received {tool}: {type(tool)}"
-                )
+                raise TypeError(f"Toolbox requires CallableWithSignature objects. Received {tool}: {type(tool)}")
 
             if not tool.signature.__doc__:
-                logger.warning(f"Function {tool.signature.__name__} requires docstrings for viable signature.")
+                logger.warning(
+                    f"Function {tool.signature.__name__} should have a docstring for proper signature export."
+                )
             try:
                 tb[tool.signature.__name__] = tool
             except Exception:
