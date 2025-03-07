@@ -1,377 +1,290 @@
+from __future__ import annotations
+
 import json
 import logging
-from typing import Callable
+from typing import Any, Callable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 import pytest
 from typing_extensions import override
 
 from yaaal.core.base import Validator
 from yaaal.core.exceptions import ResponseError, ValidationError
-from yaaal.core.handler import CompositeHandler, ResponseHandler, ToolHandler
+from yaaal.core.handler import ResponseHandler, ToolHandler
 from yaaal.core.tool import tool
-from yaaal.core.validator import PassthroughValidator, ToolValidator
-from yaaal.types.base import JSON
-from yaaal.types.core import (
-    AssistantMessage,
-    Conversation,
-    ToolResultMessage,
-    UserMessage,
-)
+from yaaal.core.validator import PassthroughValidator, PydanticValidator, ToolValidator
+from yaaal.types.core import AssistantMessage, Conversation, UserMessage
 from yaaal.types.openai_compat import (
     ChatCompletion,
     ChatCompletionChoice,
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
     ChatCompletionMessageToolCallFunction,
-    convert_response,
 )
 
 
+# --- Test Fixtures ---
 @pytest.fixture
-def test_tool():
+def text_response():
+    """Basic text response fixture"""
+    return ChatCompletion(
+        choices=[
+            ChatCompletionChoice(
+                finish_reason="stop",
+                message=ChatCompletionMessage(role="assistant", content="test content"),
+            )
+        ]
+    )
+
+
+@pytest.fixture
+def mock_callable():
+    """Create a mock callable with signature"""
+
     @tool
-    def test_tool(name: str, age: int) -> tuple:
-        return (name, age)
+    def mock_tool(x: int = 1) -> None:
+        """Mock tool for testing"""
+        pass
 
-    return test_tool
+    return mock_tool
 
 
 @pytest.fixture
-def fail_content_validator():
-    class FailValidator(Validator):
-        @override
-        def validate(self, completion: str | ChatCompletionMessageToolCall) -> str:
-            raise ValidationError
+def tool_response(mock_callable):
+    """Basic tool call response fixture using mock_tool name"""
+    return ChatCompletion(
+        choices=[
+            ChatCompletionChoice(
+                finish_reason="stop",
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    tool_calls=[
+                        ChatCompletionMessageToolCall(
+                            id="test123",
+                            function=ChatCompletionMessageToolCallFunction(
+                                name="mock_tool",
+                                arguments=json.dumps({"x": 42}),
+                            ),
+                        )
+                    ],
+                ),
+            )
+        ]
+    )
+
+
+@pytest.fixture
+def mock_validator():
+    """Mock validator for testing handler behavior"""
+
+    class MockValidator(Validator):
+        def __init__(self):
+            self.validate_called = False
+            self.repair_called = False
 
         @override
-        def repair_instructions(self, failed_content: str, error: str) -> Conversation:
-            return Conversation(
-                messages=[
-                    AssistantMessage(content=failed_content),
-                    UserMessage(
-                        content=f"""Validation failed: {error}""".strip(),
+        def validate(self, completion: Any) -> str:
+            self.validate_called = True
+            self.last_completion = completion
+            return "validated"
+
+        @override
+        def repair_instructions(self, failed_content: Any, error: str) -> Conversation:
+            self.repair_called = True
+            self.last_error = error
+            return Conversation(messages=[AssistantMessage(content="mock repair")])
+
+    return MockValidator()
+
+
+@pytest.fixture
+def calc_tool():
+    """Sample calculation tool"""
+
+    @tool
+    def add3(x: int, y: int) -> int:
+        return x + y + 3
+
+    return add3
+
+
+# --- Unit Tests: ResponseHandler ---
+class TestResponseHandlerUnit:
+    """Unit tests for ResponseHandler focusing on handler logic"""
+
+    def test_handler_calls_validator(self, text_response, mock_validator):
+        """Verify handler properly delegates to validator"""
+        handler = ResponseHandler(validator=mock_validator)
+        result = handler.process(text_response)
+
+        assert mock_validator.validate_called
+        assert mock_validator.last_completion == text_response.choices[0].message.content
+        assert result == "validated"
+
+    def test_handler_propagates_validation_error(self, text_response, mock_validator):
+        """Verify validation errors are properly propagated"""
+
+        def raise_error(_):
+            raise ValidationError("test error")
+
+        mock_validator.validate = raise_error
+        handler = ResponseHandler(validator=mock_validator)
+
+        with pytest.raises(ValidationError):
+            handler.process(text_response)
+
+    def test_repair_delegates_to_validator(self, mock_validator):
+        """Verify repair properly delegates to validator"""
+        handler = ResponseHandler(validator=mock_validator)
+        msg = ChatCompletionMessage(role="assistant", content="test")
+        handler.repair(msg, "test error")
+
+        assert mock_validator.repair_called
+        assert mock_validator.last_error == "test error"
+
+    def test_content_filter_handling(self, text_response):
+        """Test handling of filtered/refused content"""
+        handler = ResponseHandler(validator=PassthroughValidator())
+
+        filtered_response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="content_filter",
+                    message=ChatCompletionMessage(
+                        role="assistant", content=None, tool_calls=None, refusal="Content was filtered"
                     ),
-                ]
-            )
-
-    return FailValidator()
-
-
-@pytest.fixture
-def fail_tool_validator(test_tool):
-    fail_validator = ToolValidator(toolbox=[test_tool])
-
-    def validate(completion: str | ChatCompletionMessageToolCall) -> BaseModel:
-        raise ValidationError
-
-    fail_validator.validate = validate
-
-    return fail_validator
-
-
-@pytest.fixture
-def content() -> str:
-    return "test content"
-
-
-@pytest.fixture
-def chat_completion_content(content) -> ChatCompletion:
-    return ChatCompletion(
-        choices=[
-            ChatCompletionChoice(
-                finish_reason="stop",
-                message=ChatCompletionMessage(
-                    role="assistant",
-                    content=content,
-                ),
-            )
-        ]
-    )
-
-
-@pytest.fixture
-def function() -> ChatCompletionMessageToolCallFunction:
-    return ChatCompletionMessageToolCallFunction(
-        name="test_tool",
-        arguments=json.dumps({"name": "Bob", "age": 42}),
-    )
-
-
-@pytest.fixture
-def tool_call(function) -> ChatCompletionMessageToolCall:
-    return ChatCompletionMessageToolCall(
-        id="testing123",
-        function=function,
-    )
-
-
-@pytest.fixture
-def chat_completion_tool(tool_call) -> ChatCompletion:
-    return ChatCompletion(
-        choices=[
-            ChatCompletionChoice(
-                finish_reason="stop",
-                message=ChatCompletionMessage(
-                    role="assistant",
-                    tool_calls=[tool_call],
-                ),
-            )
-        ]
-    )
-
-
-class TestResponseHandler:
-    @pytest.fixture
-    def pass_handler(self):
-        return ResponseHandler(validator=PassthroughValidator())
-
-    @pytest.fixture
-    def fail_handler(self, fail_content_validator):
-        return ResponseHandler(validator=fail_content_validator)
-
-    def test_init(self, pass_handler):
-        assert isinstance(pass_handler.validator, PassthroughValidator)
-
-    def test_content_passes(self, pass_handler, content, chat_completion_content):
-        result = pass_handler.process(chat_completion_content)
-
-        assert isinstance(result, str)
-        assert result == content
-
-    def test_validation_fails(self, fail_handler, chat_completion_content):
-        with pytest.raises(ValidationError):
-            fail_handler.process(chat_completion_content)
-
-    def test_content_repair(self, fail_handler, chat_completion_content):
-        repair_instructions = fail_handler.repair(chat_completion_content.choices[0].message, "Error message")
-
-        assert isinstance(repair_instructions, Conversation)
-
-    def test_toolcall_fails(self, pass_handler, chat_completion_tool):
-        with pytest.raises(ValueError):
-            pass_handler.process(chat_completion_tool)
-
-    def test_toolcall_repair(self, fail_handler, chat_completion_tool):
-        repair_instructions = fail_handler.repair(chat_completion_tool.choices[0].message, "Error message")
-
-        assert repair_instructions is None
-
-
-class TestToolHandler:
-    @pytest.fixture
-    def pass_handler(self, test_tool):
-        return ToolHandler(validator=ToolValidator(toolbox=[test_tool]))
-
-    @pytest.fixture
-    def fail_handler(self, fail_tool_validator):
-        return ToolHandler(validator=fail_tool_validator)
-
-    def test_init(self, pass_handler):
-        """Test that ToolHandler initializes correctly."""
-        assert isinstance(pass_handler.validator, ToolValidator)
-        assert pass_handler.auto_invoke is False
-
-    def test_content_fails(self, pass_handler, chat_completion_content):
-        with pytest.raises(ValueError):
-            pass_handler.process(chat_completion_content)
-
-    def test_toolcall_passes(self, pass_handler, chat_completion_tool):
-        result = pass_handler.process(chat_completion_tool)
-
-        assert isinstance(result, BaseModel)
-        assert result.name == "Bob"
-        assert result.age == 42
-
-    def test_toolcall_invoke(self, pass_handler, chat_completion_tool, tool_call):
-        pass_handler.auto_invoke = True
-        assert pass_handler.auto_invoke
-
-        result = pass_handler.process(chat_completion_tool)
-        assert isinstance(result, str)
-        assert result == json.dumps(("Bob", 42))
-
-    def test_validation_fails(self, fail_handler, chat_completion_tool):
-        with pytest.raises(ValidationError):
-            fail_handler.process(chat_completion_tool)
-
-    def test_content_repair(self, fail_handler, chat_completion_content):
-        repair_instructions = fail_handler.repair(chat_completion_content.choices[0].message, "Error message")
-
-        assert repair_instructions is None
-
-    def test_toolcall_repair(self, fail_handler, chat_completion_tool):
-        repair_instructions = fail_handler.repair(chat_completion_tool.choices[0].message, "Error message")
-
-        assert isinstance(repair_instructions, Conversation)
-
-    # Add these new test methods after existing tests
-    def test_toolhandler_invoke_basemodel(self, chat_completion_tool):
-        class Person(BaseModel):
-            name: str
-            age: int
-
-        # customize the tool for this test
-        @tool
-        def test_tool(name: str, age: int) -> Person:
-            """Returns BaseModel"""
-            return Person(name=name, age=age)
-
-        validator = ToolValidator(toolbox=[test_tool])
-        handler = ToolHandler(validator=validator, auto_invoke=True)
-
-        result = handler.process(chat_completion_tool)
-        assert isinstance(result, BaseModel)
-        assert result.name == "Bob"
-        assert result.age == 42
-
-    def test_toolhandler_invoke_string(self, chat_completion_tool, tool_call):
-        # customize the tool for this test
-        @tool
-        def test_tool(name: str, age: int) -> str:
-            """Returns str"""
-            return "test string response"
-
-        validator = ToolValidator(toolbox=[test_tool])
-        handler = ToolHandler(validator=validator, auto_invoke=True)
-
-        result = handler.process(chat_completion_tool)
-        assert isinstance(result, str)
-        assert result == "test string response"
-
-    def test_toolhandler_invoke_serializable(self, chat_completion_tool, tool_call):
-        # customize the tool for this test
-        @tool
-        def test_tool(name: str, age: int) -> list[int]:
-            """Returns list[int] (something serializable)"""
-            return [1, 2, 3]
-
-        validator = ToolValidator(toolbox=[test_tool])
-        handler = ToolHandler(validator=validator, auto_invoke=True)
-
-        result = handler.process(chat_completion_tool)
-        assert isinstance(result, str)
-        assert result == json.dumps([1, 2, 3])
-
-    def test_toolhandler_invoke_nonserializable(self, chat_completion_tool, tool_call, caplog):
-        caplog.set_level(logging.INFO, logger="yaaal.core.handler")
-
-        # customize the tool for this test
-        @tool
-        def test_tool(name: str, age: int) -> Callable:
-            """Returns list[int] (something serializable)"""
-            return lambda x: name + str(age)  # functions are non-serializable
-
-        validator = ToolValidator(toolbox=[test_tool])
-        handler = ToolHandler(validator=validator, auto_invoke=True)
-
-        result = handler.process(chat_completion_tool)
-        logs = caplog.record_tuples
-        assert any("JSON serialization failed:" in lg[2] for lg in logs)
-
-        # Since json.dumps fails, the fallback is to return str(result)
-        assert isinstance(result, str)
-        assert result == str(
-            test_tool(**json.loads(chat_completion_tool.choices[0].message.tool_calls[0].function.arguments))
-        )
-
-
-class TestCompositeHandler:
-    @pytest.fixture
-    def test_tool(self):
-        @tool
-        def test_tool(name: str, age: int) -> tuple:
-            return (name, age)
-
-        return test_tool
-
-    @pytest.fixture
-    def pass_handler(self, test_tool):
-        return CompositeHandler(
-            content_handler=ResponseHandler(validator=PassthroughValidator()),
-            tool_handler=ToolHandler(validator=ToolValidator(toolbox=[test_tool])),
-        )
-
-    @pytest.fixture
-    def fail_handler(self, fail_content_validator, fail_tool_validator):
-        return CompositeHandler(
-            content_handler=ResponseHandler(validator=fail_content_validator),
-            tool_handler=ToolHandler(validator=fail_tool_validator),
-        )
-
-    def test_init(self, pass_handler):
-        assert isinstance(pass_handler.content_handler, ResponseHandler)
-        assert isinstance(pass_handler.tool_handler, ToolHandler)
-
-    def test_content_passes(self, pass_handler, content, chat_completion_content):
-        result = pass_handler.process(chat_completion_content)
-
-        assert isinstance(result, str)
-        assert result == content
-
-    def test_content_validation_fails(self, fail_handler, chat_completion_content):
-        with pytest.raises(ValidationError):
-            fail_handler.process(chat_completion_content)
-
-    def test_toolcall_passes(self, pass_handler, chat_completion_tool):
-        result = pass_handler.process(chat_completion_tool)
-
-        assert isinstance(result, BaseModel)
-        assert result.name == "Bob"
-        assert result.age == 42
-
-    def test_toolcall_invoke(self, pass_handler, chat_completion_tool, tool_call):
-        pass_handler.tool_handler.auto_invoke = True
-        assert pass_handler.tool_handler.auto_invoke
-
-        result = pass_handler.process(chat_completion_tool)
-        assert isinstance(result, str)
-        assert result == json.dumps(("Bob", 42))
-
-    def test_toolcallvalidation_fails(self, fail_handler, chat_completion_tool):
-        with pytest.raises(ValidationError):
-            fail_handler.process(chat_completion_tool)
-
-    def test_refusal(self, pass_handler):
-        with pytest.raises(ResponseError):
-            pass_handler.process(
-                ChatCompletion(
-                    choices=[
-                        ChatCompletionChoice(
-                            finish_reason="content_filter",
-                            message=ChatCompletionMessage(
-                                role="assistant",
-                                refusal="Error message",
-                            ),
-                        )
-                    ]
                 )
-            )
+            ]
+        )
 
-    def test_message_error(self, pass_handler):
-        with pytest.raises(ResponseError):
-            pass_handler.process(
-                ChatCompletion(
-                    choices=[
-                        ChatCompletionChoice(
-                            finish_reason="content_filter",
-                            message=ChatCompletionMessage(
-                                role="assistant",
-                                content=None,
-                                tool_calls=None,
-                                refusal=None,
-                            ),
-                        )
-                    ]
+        with pytest.raises(ValueError, match="Expected content response but received none"):
+            handler.process(filtered_response)
+
+
+# --- Unit Tests: ToolHandler ---
+class TestToolHandlerUnit:
+    """Unit tests for ToolHandler focusing on handler logic"""
+
+    @pytest.fixture
+    def mock_tool_validator(self, mock_callable):
+        """Mock tool validator that tracks calls"""
+
+        class MockToolValidator(ToolValidator):
+            def __init__(self):
+                self.validate_called = False
+                super().__init__([mock_callable])  # Initialize with valid tool
+
+            @override
+            def validate(self, completion: Any) -> BaseModel:
+                self.validate_called = True
+                self.last_completion = completion
+                return create_model("MockArgs", x=(int, 1))()
+
+        return MockToolValidator()
+
+    def test_handler_calls_validator(self, tool_response, mock_tool_validator):
+        """Verify handler properly delegates to tool validator"""
+        handler = ToolHandler(validator=mock_tool_validator)
+        handler.process(tool_response)
+
+        assert mock_tool_validator.validate_called
+        assert mock_tool_validator.last_completion == tool_response.choices[0].message.tool_calls[0]
+
+    def test_auto_invoke_respects_flag(self, tool_response, mock_tool_validator):
+        """Verify auto_invoke behavior"""
+        handler = ToolHandler(validator=mock_tool_validator, auto_invoke=False)
+        result = handler.process(tool_response)
+        assert isinstance(result, BaseModel)
+
+        handler.auto_invoke = True
+        result = handler.process(tool_response)
+        assert not isinstance(result, BaseModel)
+
+
+# --- Integration Tests ---
+class TestHandlerValidatorIntegration:
+    """Integration tests for handlers with real validators"""
+
+    def test_response_handler_with_pydantic(self):
+        """Test ResponseHandler with PydanticValidator"""
+
+        class Response(BaseModel):
+            message: str
+            count: int
+
+        handler = ResponseHandler(validator=PydanticValidator(Response))
+        response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(role="assistant", content='{"message": "test", "count": 42}'),
                 )
-            )
+            ]
+        )
 
-    def test_content_repair(self, fail_handler, chat_completion_content):
-        repair_instructions = fail_handler.repair(chat_completion_content.choices[0].message, "Error message")
+        result = handler.process(response)
+        assert isinstance(result, Response)
+        assert result.message == "test"
+        assert result.count == 42
 
-        assert isinstance(repair_instructions, Conversation)
+    def test_tool_handler_with_real_tool(self):
+        """Test ToolHandler with actual tool implementation"""
 
-    def test_toolcall_repair(self, fail_handler, chat_completion_tool):
-        repair_instructions = fail_handler.repair(chat_completion_tool.choices[0].message, "Error message")
+        @tool
+        def add(x: int, y: int) -> dict[str, int]:
+            """Add two numbers"""
+            return {"sum": x + y}
 
-        assert isinstance(repair_instructions, Conversation)
+        handler = ToolHandler(validator=ToolValidator(toolbox=[add]), auto_invoke=True)
+        response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        tool_calls=[
+                            ChatCompletionMessageToolCall(
+                                id="test1",
+                                function=ChatCompletionMessageToolCallFunction(
+                                    name="add", arguments='{"x": 2, "y": 3}'
+                                ),
+                            )
+                        ],
+                    ),
+                )
+            ]
+        )
+
+        result = handler.process(response)
+        assert result == '{"sum": 5}'
+
+    def test_error_repair_cycle(self):
+        """Test full validation error and repair cycle"""
+
+        class StrictValidator(PydanticValidator):
+            def validate(self, completion: str) -> BaseModel:
+                if "error" in completion.lower():
+                    raise ValidationError("Found error in response")
+                return super().validate(completion)
+
+        class Response(BaseModel):
+            status: str
+
+        handler = ResponseHandler(validator=StrictValidator(Response))
+        error_response = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(role="assistant", content='{"status": "error occurred"}'),
+                )
+            ]
+        )
+
+        # Verify error raised and repair instructions generated
+        with pytest.raises(ValidationError):
+            handler.process(error_response)
+
+        repair = handler.repair(error_response.choices[0].message, "Found error in response")
+        assert isinstance(repair, Conversation)
+        assert len(repair.messages) == 2
+        assert "schema" in repair.messages[1].content

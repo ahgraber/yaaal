@@ -5,7 +5,6 @@ They distinguish between content messages and tool call messages, invoking the a
 This module provides:
 - ResponseHandler: For handling plain text responses.
 - ToolHandler: For processing tool calls with validation and optional function execution.
-- CompositeHandler: Combines both approaches to handle mixed responses.
 """
 
 from __future__ import annotations
@@ -20,10 +19,15 @@ from typing_extensions import override, runtime_checkable
 from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator, ValidatorReturnType
 from .exceptions import ResponseError
 from .tool import CallableWithSignature
-from .validator import ToolValidator
+from .validator import PassthroughValidator, ToolValidator
 from ..types.base import JSON
 from ..types.core import AssistantMessage, Conversation, UserMessage
-from ..types.openai_compat import ChatCompletion, ChatCompletionMessage, ChatCompletionMessageToolCall
+from ..types.openai_compat import (
+    ChatCompletion,
+    ChatCompletionMessage,
+    ChatCompletionMessageToolCall,
+    ChatCompletionMessageToolCallFunction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +89,7 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
         return self.validator.repair_instructions(message.content, error)
 
 
-class ToolHandler(Handler[None, ToolHandlerReturnType]):
+class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerReturnType]):
     """Handles tool call responses from the LLM with validation and optional execution.
 
     If auto_invoke is enabled, the tool is automatically invoked with validated arguments.
@@ -126,21 +130,42 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
             ValueError: If no tool call was found in the response.
         """
         msg = response.choices[0].message
-        if not msg.tool_calls:
-            raise ValueError("Expected tool call but received none")
 
-        tool_call = msg.tool_calls[0]
-        function = tool_call.function
+        if msg.content:
+            # NOTE: Current assumption is that non-tool-calls are chat responses that do not need validation
+            # TODO: Revisit this assumption
+            return msg.content
 
-        validated = self.validator.validate(tool_call)
+        elif msg.tool_calls:
+            if len(msg.tool_calls) > 1:
+                logger.warning("Received multiple tool calls, only the first will be processed")
+            tool_call = msg.tool_calls[0]
+            function = tool_call.function
 
-        if not self.auto_invoke:
-            return validated
+            validated = self.validator.validate(tool_call)
 
-        # Invoke tool
-        logger.debug(f"Invoking {function.name}")
+            if not self.auto_invoke:
+                return validated
+            else:
+                return self._invoke(function, validated)
+
+        else:
+            raise ValueError("Response did not contain content or tool call")
+
+    def _invoke(self, function: ChatCompletionMessageToolCallFunction, params: BaseModel) -> BaseModel | str:
+        """Invoke a tool with validated parameters.
+
+        Parameters
+        ----------
+        function : ChatCompletionMessageToolCallFunction
+            The function to invoke.
+        params : BaseModel
+            The validated parameters to pass to the tool
+        """
         tool = self.validator.toolbox[function.name]
-        result = tool(**validated.model_dump())
+
+        logger.debug(f"Invoking {function.name} with params: {params}")
+        result = tool(**params.model_dump())
         if isinstance(result, BaseModel):
             # !!!NOTE!!!
             # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
@@ -153,7 +178,6 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
             except (TypeError, ValueError) as e:
                 logger.warning(f"JSON serialization failed: {e}")
                 content = str(result)
-
         return content
 
     @override
@@ -167,59 +191,3 @@ class ToolHandler(Handler[None, ToolHandlerReturnType]):
         if not message.tool_calls:
             return None
         return self.validator.repair_instructions(message.tool_calls[0], error)
-
-
-class CompositeHandler(
-    Generic[ContentHandlerReturnType, ToolHandlerReturnType], Handler[ContentHandlerReturnType, ToolHandlerReturnType]
-):
-    """Handles responses that may be either plain text or tool calls.
-
-    Delegates processing to either the ResponseHandler or the ToolHandler depending on the message content.
-    """
-
-    max_repair_attempts: None  # managed by sub-handlers
-
-    def __init__(
-        self,
-        content_handler: ResponseHandler[ContentHandlerReturnType],
-        tool_handler: ToolHandler,
-    ):
-        self.content_handler = content_handler or None
-        self.tool_handler = tool_handler or None
-
-    @override
-    def process(self, response: ChatCompletion) -> ContentHandlerReturnType | BaseModel | str:
-        """Determine the type of the LLM response and delegate processing accordingly.
-
-        Returns
-        -------
-            The validated and processed response from either handler.
-
-        Raises
-        ------
-            ResponseError: If the message type cannot be determined.
-        """
-        msg = response.choices[0].message
-        if msg.content:
-            return self.content_handler.process(response)
-        elif msg.tool_calls:
-            return self.tool_handler.process(response)
-        elif msg.refusal:
-            raise ResponseError(f"Received refusal {msg.refusal}")
-        else:
-            raise ResponseError("Could not identify message type")
-
-    @override
-    def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
-        """Delegate repair instruction generation based on the message type.
-
-        Returns
-        -------
-            A Conversation with repair instructions, or None if not applicable.
-        """
-        if message.content:
-            return self.content_handler.repair(message, error)
-        elif message.tool_calls:
-            return self.tool_handler.repair(message, error)
-        else:
-            return None
