@@ -1,23 +1,17 @@
-"""Components for composable prompting.
+"""Components for composable prompting with LLMs.
 
-The base unit is a Message(role, context), which has generally been accepted by all LLM chat APIs.
+This module provides tools for building structured prompts using a template system:
 
-A list of Messages is a Conversation, which provides easy conversion to a messages array for API calls.
+- Message: Base unit representing a role+content pair for LLM chat APIs
+- Conversation: A sequence of Messages for API calls
+- MessageTemplate: Abstract base for rendering Messages from templates
+- StaticMessageTemplate: For fixed, non-templated messages
+- StringMessageTemplate: Uses Python string.Template for variable substitution
+- JinjaMessageTemplate: Uses Jinja2 for more complex templating
+- ConversationTemplate: Composes multiple templates into a complete conversation
 
-Sometimes we may want to predefine the messages in the conversation via MessageTemplates.
-A MessageTemplate defines the role, the template, and the rendering method to generate a Message.
-It may also add variable validation with pydantic through the validation_model attribute.
-
-StaticMessageTemplate provides a prompt template that is not templated, that is,
-there are no template variables and it renders exactly the same string every time.
-
-StringMessageTemplate uses str.format() to render a templated string based on a dict provided at render-time.
-
-JinjaMessageTemplate uses a jinja2 Template to render a templated string based on a dict provided at render-time.
-
-A Prompt is a way to use various MessageTemplates to render a Conversation.
-We may want to treat Prompts as Functions or Tools for the tool-calling API;
-Prompts provide a 'signature' method to mock a function signature that details all of the template variables necessary.
+Templates support variable validation through Pydantic models and can generate
+OpenAPI-compatible schemas for use with tool-calling APIs.
 """
 
 from abc import abstractmethod
@@ -39,10 +33,10 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class MessageTemplate(Protocol):
-    """Base class for rendering a Message.
+    """Protocol defining interface for message template rendering.
 
-    Defines interface for converting templates and variables into Messages.
-    Subclasses implement specific templating engines.
+    Provides common interface for converting templates with variables into Messages.
+    Concrete implementations handle specific templating engines and validation.
 
     Attributes
     ----------
@@ -61,10 +55,10 @@ class MessageTemplate(Protocol):
 
 
 class StaticMessageTemplate(MessageTemplate):
-    """Render static messages.
+    """Template for messages with fixed, non-templated content.
 
-    Used for constant system messages or fixed responses.
-    Ignores any template variables passed during rendering.
+    Useful for system prompts or other messages that don't need variable substitution.
+    Any template variables passed during rendering are ignored.
 
     Args:
         role: The role for rendered messages
@@ -73,8 +67,11 @@ class StaticMessageTemplate(MessageTemplate):
 
     Examples
     --------
-        >>> template = StaticMessageTemplate(role="system", template="You are a helpful assistant.")
-        >>> msg = template.render()  # Variables optional
+        >>> tmpl = StaticMessageTemplate(
+        ...     role="system",
+        ...     template="You are a helpful assistant.",
+        ... )
+        >>> msg = tmpl.render()  # Variables are optional
         >>> assert msg.content == "You are a helpful assistant."
     """
 
@@ -95,12 +92,12 @@ class StaticMessageTemplate(MessageTemplate):
 
 
 class StringMessageTemplate(MessageTemplate):
-    """Render with Python's string.Template.
+    """Template using Python's string.Template for basic variable substitution.
 
-    Uses template strings with $-based substitution:
-    - Variables denoted by $varname or ${varname}
-    - Optional Pydantic validation of variables
-    - Strict variable substitution (raises KeyError for missing vars)
+    Provides simple $-based variable substitution with optional Pydantic validation:
+    - Variables denoted as $var or ${var}
+    - Strict substitution that raises KeyError for missing variables
+    - Optional validation of variable types and constraints
 
     Args:
         role: The role for rendered messages
@@ -109,11 +106,15 @@ class StringMessageTemplate(MessageTemplate):
 
     Examples
     --------
-        >>> class UserVars(BaseModel):
+        >>> class Person(BaseModel):
         ...     name: str
         ...     age: int
-        >>> template = StringMessageTemplate(role="user", template="Name: $name, Age: $age", validation_model=UserVars)
-        >>> msg = template.render({"name": "Bob", "age": 42})
+        >>> tmpl = StringMessageTemplate(
+        ...     role="user",
+        ...     template="I am $name, age $age",
+        ...     validation_model=Person,
+        ... )
+        >>> msg = tmpl.render({"name": "Bob", "age": 42})
     """
 
     def __init__(
@@ -172,12 +173,12 @@ class StringMessageTemplate(MessageTemplate):
             return Message(role=self.role, content=self.template.substitute(validated_vars))
 
 
-class PassthroughMessageTemplate(StringMessageTemplate):
+class UserMessageTemplate(StringMessageTemplate):
     """Render message by passing content through.
 
     Simplifies creating prompts that need raw user input by:
     - Enforcing 'user' role
-    - Creating model with 'content' field
+    - Creating model with 'user' field
     - Using simple string substitution
 
     Args:
@@ -187,8 +188,8 @@ class PassthroughMessageTemplate(StringMessageTemplate):
 
     Examples
     --------
-        >>> template = PassthroughMessageTemplate()
-        >>> msg = template.render({"content": "Hello!"})
+        >>> tmpl = UserMessageTemplate()
+        >>> msg = tmpl.render({"user": "Hello!"})
         >>> assert msg.content == "Hello!"
         >>> assert msg.role == "user"
     """
@@ -205,10 +206,12 @@ class PassthroughMessageTemplate(StringMessageTemplate):
 
 
 class JinjaMessageTemplate(MessageTemplate):
-    """Jinja2 template renderer.
+    """Template using Jinja2 for advanced templating features.
 
-    Provides Jinja2 templating with optional Pydantic validation.
-    Uses StrictUndefined to catch missing variables.
+    Provides full Jinja2 templating capabilities with optional Pydantic validation:
+    - Full Jinja2 syntax support (conditionals, loops, filters etc)
+    - Strict undefined variable handling
+    - Optional validation of variable types and constraints
 
     Args:
         role: The role for rendered messages
@@ -217,15 +220,15 @@ class JinjaMessageTemplate(MessageTemplate):
 
     Examples
     --------
-        >>> class UserVars(BaseModel):
+        >>> class Person(BaseModel):
         ...     name: str
-        ...     age: int
-        >>> template = JinjaMessageTemplate(
+        ...     items: list[str]
+        >>> tmpl = JinjaMessageTemplate(
         ...     role="user",
-        ...     template="Hi, I'm {{name}}, {{age}} years old",
-        ...     validation_model=UserVars,
+        ...     template="Hi {{name}}, your items: {% for i in items %}{{i}}, {% endfor %}",
+        ...     validation_model=Person,
         ... )
-        >>> msg = template.render({"name": "Bob", "age": 42})
+        >>> msg = tmpl.render({"name": "Bob", "items": ["a", "b"]})
     """
 
     def __init__(
