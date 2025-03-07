@@ -4,7 +4,7 @@ from pathlib import Path
 import textwrap
 
 from .log_helpers import LOG_FMT, basic_log_config, logging_redirect_tqdm
-from ..types.base import JSON
+from ..types_.base import JSON
 
 __all__ = [
     "LOG_FMT",

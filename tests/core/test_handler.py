@@ -13,8 +13,8 @@ from yaaal.core.exceptions import ResponseError, ValidationError
 from yaaal.core.handler import ResponseHandler, ToolHandler
 from yaaal.core.tool import tool
 from yaaal.core.validator import PassthroughValidator, PydanticValidator, ToolValidator
-from yaaal.types.core import AssistantMessage, Conversation, UserMessage
-from yaaal.types.openai_compat import (
+from yaaal.types_.core import AssistantMessage, Conversation, UserMessage
+from yaaal.types_.openai_compat import (
     ChatCompletion,
     ChatCompletionChoice,
     ChatCompletionMessage,

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import pytest
 
 from yaaal.core.tool import Tool, anthropic_pydantic_function_tool, pydantic_function_signature, tool
-from yaaal.types.core import ToolResultMessage
+from yaaal.types_.core import ToolResultMessage
 
 
 class TestFunctionSchema:

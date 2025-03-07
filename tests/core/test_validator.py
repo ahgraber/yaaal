@@ -14,8 +14,8 @@ from yaaal.core.validator import (
     RegexValidator,
     ToolValidator,
 )
-from yaaal.types.core import Conversation, Message
-from yaaal.types.openai_compat import ChatCompletionMessageToolCall, ChatCompletionMessageToolCallFunction
+from yaaal.types_.core import Conversation, Message
+from yaaal.types_.openai_compat import ChatCompletionMessageToolCall, ChatCompletionMessageToolCallFunction
 
 
 class TestPassthroughValidator:

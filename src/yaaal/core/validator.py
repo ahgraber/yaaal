@@ -21,12 +21,12 @@ from typing_extensions import override, runtime_checkable
 from .base import Validator, ValidatorReturnType
 from .exceptions import ValidationError
 from .tool import CallableWithSignature
-from ..types.core import (
+from ..types_.core import (
     AssistantMessage,
     Conversation,
     UserMessage,
 )
-from ..types.openai_compat import (
+from ..types_.openai_compat import (
     ChatCompletionMessageToolCall,
 )
 

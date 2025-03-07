@@ -13,8 +13,8 @@ from yaaal.core.template import (
     StringMessageTemplate,
     UserMessageTemplate,
 )
-from yaaal.types.base import JSON
-from yaaal.types.core import Conversation, Message
+from yaaal.types_.base import JSON
+from yaaal.types_.core import Conversation, Message
 
 
 class TestMessageTemplate:

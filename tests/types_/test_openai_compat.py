@@ -21,7 +21,7 @@ from openai.types.chat.chat_completion_message_tool_call import (
     Function as OpenAIChatCompletionMessageToolCallFunction,
 )
 
-from yaaal.types.openai_compat import (
+from yaaal.types_.openai_compat import (
     ChatCompletion,
     ChatCompletionChoice,
     ChatCompletionMessage,

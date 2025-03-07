@@ -23,9 +23,9 @@ from jinja2 import StrictUndefined, Template as JinjaTemplate
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from typing_extensions import override, runtime_checkable  # TODO: import from typing when drop support for 3.11
 
-from ..types.base import JSON
-from ..types.core import Conversation, Message, Role
-from ..types.utils import merge_models
+from ..types_.base import JSON
+from ..types_.core import Conversation, Message, Role
+from ..types_.utils import merge_models
 from ..utilities import to_snake_case
 
 logger = logging.getLogger(__name__)
