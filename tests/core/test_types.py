@@ -1,8 +1,8 @@
 from pydantic import BaseModel, ValidationError, create_model
 import pytest
 
-from yaaal.types.base import JSON
-from yaaal.types.core import Conversation, Message
+from yaaal.types_.base import JSON
+from yaaal.types_.core import Conversation, Message
 
 
 class TestMessage:

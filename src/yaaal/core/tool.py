@@ -11,9 +11,9 @@ from typing_extensions import override, runtime_checkable
 
 from .base import CallableReturnType, CallableWithSignature
 from .exceptions import ValidationError
-from ..types.base import JSON
-from ..types.core import ToolResultMessage
-from ..types.utils import get_union_args, is_type_annotation
+from ..types_.base import JSON
+from ..types_.core import ToolResultMessage
+from ..types_.utils import get_union_args, is_type_annotation
 
 logger = logging.getLogger(__name__)
 

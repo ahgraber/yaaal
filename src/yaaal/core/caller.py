@@ -25,9 +25,9 @@ from .handler import ResponseHandler, ToolHandler  # , CompositeHandler
 from .template import ConversationTemplate
 from .tool import anthropic_pydantic_function_tool
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
-from ..types.base import JSON
-from ..types.core import Conversation, Message, UserMessage
-from ..types.openai_compat import ChatCompletion, convert_response
+from ..types_.base import JSON
+from ..types_.core import Conversation, Message, UserMessage
+from ..types_.openai_compat import ChatCompletion, convert_response
 
 logger = logging.getLogger(__name__)
 

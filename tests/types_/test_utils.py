@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import pytest
 import typing_extensions
 
-from yaaal.types.utils import (
+from yaaal.types_.utils import (
     TypeMergeError,
     _is_subclass_safe,
     _resolve_collection_types,

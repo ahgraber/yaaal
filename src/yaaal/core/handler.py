@@ -20,9 +20,9 @@ from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Vali
 from .exceptions import ResponseError
 from .tool import CallableWithSignature
 from .validator import PassthroughValidator, ToolValidator
-from ..types.base import JSON
-from ..types.core import AssistantMessage, Conversation, UserMessage
-from ..types.openai_compat import (
+from ..types_.base import JSON
+from ..types_.core import AssistantMessage, Conversation, UserMessage
+from ..types_.openai_compat import (
     ChatCompletion,
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,

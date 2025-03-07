@@ -14,9 +14,9 @@ from typing import Generic, Protocol, Type, Union
 from pydantic import BaseModel
 from typing_extensions import TypeAlias, TypeVar, runtime_checkable
 
-from ..types.base import JSON
-from ..types.core import Conversation, Message
-from ..types.openai_compat import (
+from ..types_.base import JSON
+from ..types_.core import Conversation, Message
+from ..types_.openai_compat import (
     ChatCompletion,
     ChatCompletionMessage,
     ChatCompletionMessageToolCall,
