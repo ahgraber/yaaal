@@ -1,31 +1,21 @@
 from __future__ import annotations
 
 import json
-import re
-from typing import Pattern, Type
-from unittest.mock import Mock, create_autospec, patch
+from typing import Any
+from unittest.mock import Mock, create_autospec
 
 from pydantic import BaseModel, create_model
 import pytest
 
 from aisuite import Client
-from aisuite.framework import ChatCompletionResponse
 
-from yaaal.core.base import CallableWithSignature
-from yaaal.core.caller import (
-    Caller,
-    _make_structured_params,
-    _make_tool_params,
-    create_chat_caller,
-    create_structured_caller,
-    create_tool_caller,
-)
+from yaaal.core.caller import Caller, create_chat_caller, create_structured_caller, create_tool_caller
 from yaaal.core.exceptions import ValidationError
-from yaaal.core.handler import CompositeHandler, ResponseHandler, ToolHandler
-from yaaal.core.prompt import Prompt, StaticMessageTemplate, StringMessageTemplate
+from yaaal.core.handler import ResponseHandler, ToolHandler
+from yaaal.core.template import ConversationTemplate, StaticMessageTemplate, StringMessageTemplate
 from yaaal.core.tool import tool
 from yaaal.core.validator import PassthroughValidator, PydanticValidator, ToolValidator
-from yaaal.types.core import AssistantMessage, Conversation, ToolResultMessage, UserMessage
+from yaaal.types.core import AssistantMessage, Conversation, UserMessage
 from yaaal.types.openai_compat import (
     ChatCompletion,
     ChatCompletionChoice,
@@ -35,343 +25,322 @@ from yaaal.types.openai_compat import (
 )
 
 
+# --- Test Fixtures ---
 @pytest.fixture
 def client():
-    return create_autospec(Client)  # Mock external API
+    """Mock API client"""
+    return create_autospec(Client)
 
 
 @pytest.fixture
-def model():
-    return "provider:gpt"
-
-
-@pytest.fixture
-def prompt():
-    return Prompt(
-        name="Simple prompt",
-        description="A simple assistant",
-        system_template=StaticMessageTemplate(role="system", template="You are a test assistant"),
-        user_template=StringMessageTemplate(
-            role="user",
-            template="Quiz me on $topic",
-            template_vars_model=create_model("user_vars", topic=(str, ...)),
-        ),
+def conversation_template():
+    """Basic conversation template for testing"""
+    return ConversationTemplate(
+        name="test_template",
+        description="Test template",
+        conversation_spec=[
+            StaticMessageTemplate(role="system", template="You are a test assistant"),
+            StringMessageTemplate(
+                role="user", template="Process $input", validation_model=create_model("Vars", input=(str, ...))
+            ),
+        ],
     )
 
 
 @pytest.fixture
-def passthrough_handler(response_model):
-    return ResponseHandler(validator=PassthroughValidator())
-
-
-@pytest.fixture
-def chat_response():
+def simple_response():
+    """Basic text response from LLM"""
     return ChatCompletion(
         choices=[
             ChatCompletionChoice(
-                finish_reason="stop",
-                message=ChatCompletionMessage(
-                    role="assistant",
-                    content="This is a test",
-                    tool_calls=None,
-                    refusal=None,
-                ),
+                finish_reason="stop", message=ChatCompletionMessage(role="assistant", content="test response")
             )
         ]
     )
 
 
 @pytest.fixture
-def response_model():
-    class TestModel(BaseModel):
-        name: str
-        age: int
-
-    return TestModel
-
-
-@pytest.fixture
-def pydantic_handler(response_model):
-    return ResponseHandler(validator=PydanticValidator(model=response_model))
-
-
-@pytest.fixture
-def structured_response():
-    return ChatCompletion(
-        choices=[
-            ChatCompletionChoice(
-                finish_reason="stop",
-                message=ChatCompletionMessage(
-                    role="assistant",
-                    content=json.dumps({"name": "Bob", "age": 42}),
-                    tool_calls=None,
-                    refusal=None,
-                ),
-            )
-        ]
+def mock_handler():
+    """Mock handler with tracking capabilities"""
+    handler = Mock()
+    handler.process.return_value = "processed"
+    handler.repair.return_value = Conversation(
+        messages=[AssistantMessage(content="bad response"), UserMessage(content="please fix")]
     )
+    return handler
 
 
 @pytest.fixture
-def add_tool():
-    @tool
-    def add3(x: int, y: int) -> int:
-        """A fancy way to add."""
-        return x + y + 3
-
-    return add3
-
-
-@pytest.fixture
-def tool_handler(add_tool):
-    return ToolHandler(validator=ToolValidator(toolbox=[add_tool]))
-
-
-@pytest.fixture
-def tool_response():
+def error_response():
+    """Response with content filter/error"""
     return ChatCompletion(
         choices=[
             ChatCompletionChoice(
-                finish_reason="tool_calls",
+                finish_reason="content_filter",
                 message=ChatCompletionMessage(
                     role="assistant",
                     content=None,
-                    tool_calls=[
-                        ChatCompletionMessageToolCall(
-                            id="call1",
-                            function=ChatCompletionMessageToolCallFunction(
-                                name="add3",
-                                arguments=json.dumps({"x": 1, "y": 2}),
-                            ),
-                        )
-                    ],
-                    refusal=None,
+                    tool_calls=None,  # Explicitly set tool_calls to None
+                    refusal="Content was filtered",
                 ),
             )
         ]
     )
 
 
-class TestCallerInitialization:
-    def test_init(self, client, model, prompt):
-        caller = Caller(client=client, model=model, prompt=prompt, handler=Mock())
-        assert caller.client == client
-        assert caller.model == model
-        assert caller.prompt == prompt
-        assert caller.request_params == {}
+# --- Unit Tests: Core Caller Functionality ---
+class TestCallerCore:
+    """Unit tests for core Caller functionality"""
 
-    def test_make_request_params(self, client, model, prompt):
-        params = {"temperature": 0.8}
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=Mock(),
-            request_params=params,
-        )
+    def test_model_validation(self, client, conversation_template, mock_handler):
+        """Test model name validation"""
+        # Valid model format
+        caller = Caller(client, "provider:model", conversation_template, mock_handler)
+        assert caller.model == "provider:model"
+
+        # Invalid model format
+        with pytest.raises(ValueError, match="must be in format"):
+            Caller(client, "invalid_model", conversation_template, mock_handler)
+
+    def test_request_params_validation(self, client, conversation_template, mock_handler):
+        """Test request parameter validation"""
+        # Valid params
+        params = {"temperature": 0.7}
+        caller = Caller(client, "provider:model", conversation_template, mock_handler, request_params=params)
         assert caller.request_params == params
 
-    def test_make_request_params_with_model(self, client, model, prompt):
-        with pytest.raises(ValueError):
+        # Invalid params (model specified)
+        with pytest.raises(ValueError, match="'model' should be set separately"):
             Caller(
-                client=client,
-                model=model,
-                prompt=prompt,
-                handler=Mock(),
-                request_params={"model": model},
+                client, "provider:model", conversation_template, mock_handler, request_params={"model": "other:model"}
             )
 
-    def test_signature(self, client, model, prompt, passthrough_handler):
+    def test_max_repair_attempts(self, client, conversation_template, mock_handler, simple_response):
+        """Test max repair attempts respected"""
+        # Setup handler to always fail
+        mock_handler.process.side_effect = ValueError("Always fail")
+
+        # Setup client to always return a valid response
+        client.chat.completions.create.return_value = simple_response
+
         caller = Caller(
             client=client,
-            model=model,
-            prompt=prompt,
-            handler=passthrough_handler,
-        )
-        assert caller.signature.model_json_schema() == caller.prompt.signature.model_json_schema()
-
-
-class TestCallerRepairMechanism:
-    def test_handle_with_repair_success(self, client, model, prompt, chat_response):
-        mock_handler = Mock()
-        mock_handler.process.return_value = "Success!"
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
+            model="provider:model",
+            conversation_template=conversation_template,
             handler=mock_handler,
+            max_repair_attempts=2,
         )
-        conversation = prompt.render(user_vars={"topic": "rhymes with 'T'"})
-
-        result = caller._handle_with_repair(conversation, chat_response)
-        assert result == "Success!"
-        mock_handler.process.assert_called_once_with(chat_response)
-
-    def test_handle_with_repair_retry_success(self, client, model, prompt, chat_response):
-        mock_handler = Mock()
-        mock_handler.process.side_effect = [ValueError("Bad response"), "Fixed!"]
-        mock_handler.repair = Mock(
-            return_value=Conversation(
-                messages=[AssistantMessage(content="invalid"), UserMessage(content="Please fix")]
-            )
-        )
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=mock_handler,
-        )
-        conversation = prompt.render(user_vars={"topic": "rhymes with 'T'"})
-        client.chat.completions.create.return_value = chat_response
-
-        result = caller._handle_with_repair(conversation, chat_response)
-        assert result == "Fixed!"
-        assert len(conversation.messages) == 4  # initial + repair messages
-        assert conversation.messages[-1].content == "Please fix"
-        assert mock_handler.process.call_count == 2
-
-    def test_handle_with_repair_max_attempts(self, client, model, prompt, chat_response):
-        mock_handler = Mock()
-        mock_handler.process.side_effect = [ValueError("Bad response")]
-        mock_handler.repair = Mock(
-            return_value=Conversation(
-                messages=[AssistantMessage(content="invalid"), UserMessage(content="Please fix")]
-            )
-        )
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=mock_handler,
-        )
-        conversation = prompt.render(user_vars={"topic": "rhymes with 'T'"})
-        client.chat.completions.create.return_value = chat_response
 
         with pytest.raises(ValidationError, match="Max repair attempts reached"):
-            caller._handle_with_repair(conversation, chat_response)
+            caller(input="test")
 
-        assert mock_handler.process.call_count == caller.max_repair_attempts + 1
+        assert mock_handler.process.call_count == 3  # Initial + 2 repairs
+        assert mock_handler.repair.call_count == 2  # Should attempt repair twice
 
-    def test_handle_with_repair_no_instructions(self, client, model, prompt, chat_response):
-        mock_handler = Mock()
-        mock_handler.process.side_effect = [ValueError("Bad response")]
-        mock_handler.repair = Mock(return_value=None)
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=mock_handler,
-        )
-        conversation = prompt.render(user_vars={"topic": "rhymes with 'T'"})
+    def test_provider_specific_params(self, client, conversation_template):
+        """Test provider-specific parameter generation"""
 
-        with pytest.raises(ValidationError, match="No repair instructions available"):
-            caller._handle_with_repair(conversation, chat_response)
+        class TestResponse(BaseModel):
+            value: str
 
-        mock_handler.process.assert_called_once_with(chat_response)
+        # Test OpenAI format
+        caller = create_structured_caller(client, "openai:gpt-4", conversation_template, TestResponse)
+        assert caller.request_params["response_format"] == {"type": "json_object"}
+
+        # Test Anthropic format
+        caller = create_structured_caller(client, "anthropic:claude", conversation_template, TestResponse)
+        assert "tools" in caller.request_params
+        assert caller.request_params["tool_choice"]["type"] == "tool"
+
+
+# --- Unit Tests: Handler Integration ---
+class TestCallerHandlerIntegration:
+    """Tests for Caller interaction with handlers"""
+
+    def test_handler_processing(self, client, conversation_template, mock_handler, simple_response):
+        """Test basic handler processing flow"""
+        caller = Caller(client, "provider:model", conversation_template, mock_handler)
+        client.chat.completions.create.return_value = simple_response
+
+        result = caller(input="test")
+        assert result == "processed"
+        mock_handler.process.assert_called_once()
+
+    def test_repair_mechanism(self, client, conversation_template, mock_handler, simple_response):
+        """Test repair flow when handler raises error"""
+        mock_handler.process.side_effect = [ValueError("error"), "fixed"]
+        caller = Caller(client, "provider:model", conversation_template, mock_handler)
+        client.chat.completions.create.return_value = simple_response
+
+        result = caller(input="test")
+        assert result == "fixed"
+        assert mock_handler.process.call_count == 2
         mock_handler.repair.assert_called_once()
 
+    def test_empty_conversation_rejected(self, client, mock_handler):
+        """Test empty conversation validation"""
+        with pytest.raises(ValueError, match="Conversation list cannot be empty"):
+            ConversationTemplate(
+                name="empty",
+                description="Empty template",
+                conversation_spec=[],  # Empty spec
+            )
 
-class TestCallerRun:
-    def test_with_passthrough_handler(self, client, model, prompt, passthrough_handler, chat_response):
-        client.chat.completions.create.return_value = chat_response
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=passthrough_handler,
+    def test_conversation_validation(self, client, mock_handler):
+        """Test conversation template validation"""
+        # Missing system message
+        with pytest.raises(ValueError, match="must contain at least one system message"):
+            ConversationTemplate(
+                name="bad",
+                description="Bad template",
+                conversation_spec=[
+                    StringMessageTemplate(
+                        role="user", template="$input", validation_model=create_model("Vars", input=(str, ...))
+                    )
+                ],
+            )
+
+    def test_invalid_response_repair(self, client, conversation_template, mock_handler, simple_response):
+        """Test repair cycle with invalid responses"""
+        # Setup handler to fail validation twice then succeed
+        mock_handler.process.side_effect = [ValidationError("First error"), ValidationError("Second error"), "success"]
+
+        caller = Caller(client, "provider:model", conversation_template, mock_handler)
+        client.chat.completions.create.return_value = simple_response
+
+        result = caller(input="test")
+        assert result == "success"
+        assert mock_handler.process.call_count == 3
+        assert mock_handler.repair.call_count == 2
+
+
+# --- Integration Tests: Complete Flows ---
+class TestCallerIntegration:
+    """Full integration tests for different caller configurations"""
+
+    def test_chat_flow(self, client, conversation_template, simple_response):
+        """Test basic chat flow with PassthroughValidator"""
+        caller = create_chat_caller(client, "provider:model", conversation_template)
+        client.chat.completions.create.return_value = simple_response
+
+        result = caller(input="test")
+        assert result == "test response"
+
+    def test_structured_flow(self, client, conversation_template):
+        """Test structured response flow with PydanticValidator"""
+
+        class Response(BaseModel):
+            message: str
+
+        caller = create_structured_caller(client, "provider:model", conversation_template, Response)
+        client.chat.completions.create.return_value = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(role="assistant", content='{"message": "test"}'),
+                )
+            ]
         )
 
-        result = caller(user_vars={"topic": "test input"})
-        assert isinstance(result, str)
-        assert result == "This is a test"
+        result = caller(input="test")
+        assert isinstance(result, Response)
+        assert result.message == "test"
 
-    def test_with_pydantic_handler(self, client, model, prompt, pydantic_handler, structured_response):
-        client.chat.completions.create.return_value = structured_response
-        caller = Caller(client=client, model=model, prompt=prompt, handler=pydantic_handler)
+    def test_tool_flow(self, client, conversation_template):
+        """Test tool calling flow"""
 
-        result = caller(user_vars={"topic": "test input"})
-        assert isinstance(result, BaseModel)
-        assert result.model_dump() == {"name": "Bob", "age": 42}
+        @tool
+        def test_tool(x: int) -> int:
+            """Test tool"""
+            return x + 1
 
-    def test_with_tool_handler(self, client, model, prompt, tool_handler, tool_response):
-        client.chat.completions.create.return_value = tool_response
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=tool_handler,
+        caller = create_tool_caller(client, "provider:model", conversation_template, [test_tool], auto_invoke=True)
+        client.chat.completions.create.return_value = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        tool_calls=[
+                            ChatCompletionMessageToolCall(
+                                id="test1",
+                                function=ChatCompletionMessageToolCallFunction(name="test_tool", arguments='{"x": 1}'),
+                            )
+                        ],
+                    ),
+                )
+            ]
         )
 
-        result = caller(user_vars={"topic": "test input"})
-        assert isinstance(result, BaseModel)
-        assert result.model_dump() == {"x": 1, "y": 2}
+        result = caller(input="test")
+        assert result == "2"  # String because of JSON serialization
 
-    def test_with_tool_handler_invoke(self, client, model, prompt, tool_handler, tool_response):
-        client.chat.completions.create.return_value = tool_response
-        tool_handler.auto_invoke = True
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=tool_handler,
+    def test_structured_validation_failure(self, client, conversation_template):
+        """Test structured response with invalid JSON"""
+
+        class Response(BaseModel):
+            value: int
+
+        caller = create_structured_caller(client, "provider:model", conversation_template, Response)
+        client.chat.completions.create.return_value = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content='{"value": "not_an_int"}',  # Invalid type
+                    ),
+                )
+            ]
         )
 
-        result = caller(user_vars={"topic": "test input"})
-        assert isinstance(result, str)
-        assert result == str(6)  # Changed from ToolResultMessage check
+        with pytest.raises(ValidationError):
+            caller(input="test")
 
-    def test_call_with_existing_conversation(self, client, model, prompt, passthrough_handler, chat_response):
-        conversation = prompt.render(user_vars={"topic": "initial topic"})
+    def test_tool_validation_failure(self, client, conversation_template):
+        """Test tool call with invalid arguments"""
 
-        client.chat.completions.create.return_value = chat_response
+        @tool
+        def test_tool(x: int, y: int) -> int:
+            """Test tool requiring two arguments"""
+            return x + y
 
-        caller = Caller(
-            client=client,
-            model=model,
-            prompt=prompt,
-            handler=passthrough_handler,
+        caller = create_tool_caller(client, "provider:model", conversation_template, [test_tool])
+        client.chat.completions.create.return_value = ChatCompletion(
+            choices=[
+                ChatCompletionChoice(
+                    finish_reason="stop",
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        tool_calls=[
+                            ChatCompletionMessageToolCall(
+                                id="test1",
+                                function=ChatCompletionMessageToolCallFunction(
+                                    name="test_tool",
+                                    arguments='{"x": 1}',  # Missing required argument y
+                                ),
+                            )
+                        ],
+                    ),
+                )
+            ]
         )
 
-        result = caller(conversation=conversation, user_vars={"topic": "second topic"})
-        assert len(conversation.messages) == 4
-        msgs = [m.content for m in conversation.messages]
-        assert "initial topic" in msgs[1]  # 0, system; 1, user
-        assert "second topic" in msgs[3]  # 2, system; 3, user
-        assert result == "This is a test"
+        with pytest.raises(ValidationError):
+            caller(input="test")
 
+    def test_conversation_history_merging(self, client, conversation_template, simple_response):
+        """Test merging of conversation history"""
+        caller = create_chat_caller(client, "provider:model", conversation_template)
+        client.chat.completions.create.return_value = simple_response
 
-class TestCallerFactories:
-    def test_create_chat_caller(self, client, model, prompt):
-        caller = create_chat_caller(client, model, prompt)
-        assert isinstance(caller.handler, ResponseHandler)
-        assert isinstance(caller.handler.validator, PassthroughValidator)
+        # Create existing conversation
+        history = Conversation(messages=[UserMessage(content="previous message")])
 
-    def test_create_structured_caller(self, client, model, prompt, response_model):
-        caller = create_structured_caller(client, model, prompt, response_model)
-        assert isinstance(caller.handler, ResponseHandler)
-        assert isinstance(caller.handler.validator, PydanticValidator)
+        caller(conversation_history=history, input="test")
 
-    def test_create_tool_caller(self, client, model, prompt, add_tool):
-        caller = create_tool_caller(client, model, prompt, [add_tool])
-        assert isinstance(caller.handler, ToolHandler)
-        assert isinstance(caller.handler.validator, ToolValidator)
-
-
-class TestCallerHelpers:
-    def test_make_structured_params_anthropic(self):
-        params = _make_structured_params(model="anthropic:baube")
-        assert params == {"response_format": {"type": "json"}}
-
-    def test_make_structured_params_openai(self):
-        params = _make_structured_params("openai:mdl")
-        assert params == {"response_format": {"type": "json_object"}}
-
-    def test_make_tool_params_anthropic(self, add_tool):
-        params = _make_tool_params("anthropic:baube", [add_tool])
-        assert "tools" in params
-        assert params["tool_choice"] == {"type": "auto"}
-
-    def test_make_tool_params_openai(self, add_tool):
-        params = _make_tool_params("openai:mdl", [add_tool])
-        assert "tools" in params
-        assert params["tool_choice"] == "auto"
+        # Verify API call included both history and new messages
+        call_args = client.chat.completions.create.call_args[1]
+        messages = call_args["messages"]
+        assert len(messages) > 2  # Should include history + new messages
+        assert messages[0]["content"] == "previous message"
