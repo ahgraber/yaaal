@@ -70,11 +70,22 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
         msg = response.choices[0].message
         if msg.content:
             validated = self.validator.validate(msg.content)
-            # !!!NOTE!!!
-            # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
-            # return json.dumps(validated.model_dump()) if isinstance(validated, BaseModel) else validated
-            return validated
-        raise ValueError("Expected content response but received none")
+
+        # handle case where we use function-calling as proxy for structured response
+        elif msg.tool_calls:
+            if len(msg.tool_calls) > 1:
+                logger.warning("Received multiple tool calls, only the first will be processed")
+            tool_call = msg.tool_calls[0]
+
+            validated = self.validator.validate(tool_call.function.arguments)
+
+        else:
+            raise ValueError("Expected content response but received none")
+
+        # !!!NOTE!!!
+        # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
+        # return json.dumps(validated.model_dump()) if isinstance(validated, BaseModel) else validated
+        return validated
 
     @override
     def repair(self, message: ChatCompletionMessage, error: str) -> Conversation | None:
@@ -84,9 +95,12 @@ class ResponseHandler(Generic[ContentHandlerReturnType], Handler[ContentHandlerR
         -------
             A Conversation with repair instructions or None if no content is available.
         """
-        if not message.content:
+        if message.content:
+            return self.validator.repair_instructions(message.content, error)
+        elif message.tool_calls:
+            return self.validator.repair_instructions(message.tool_calls[0].function.arguments, error)
+        else:
             return None
-        return self.validator.repair_instructions(message.content, error)
 
 
 class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerReturnType]):
@@ -131,12 +145,9 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
         """
         msg = response.choices[0].message
 
-        if msg.content:
-            # NOTE: Current assumption is that non-tool-calls are chat responses that do not need validation
-            # TODO: Revisit this assumption
-            return msg.content
-
-        elif msg.tool_calls:
+        # NOTE: Anthropic may send content and tool_calls in same response
+        # In these cases we only use the tool call
+        if msg.tool_calls:
             if len(msg.tool_calls) > 1:
                 logger.warning("Received multiple tool calls, only the first will be processed")
             tool_call = msg.tool_calls[0]
@@ -148,6 +159,11 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
                 return validated
             else:
                 return self._invoke(function, validated)
+
+        elif msg.content:
+            # NOTE: Current assumption is that non-tool-calls are chat responses that do not need validation
+            # TODO: Revisit this assumption
+            return msg.content
 
         else:
             raise ValueError("Response did not contain content or tool call")
