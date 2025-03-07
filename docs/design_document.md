@@ -11,10 +11,10 @@
   - [3. Key Features](#3-key-features)
     - [3.1 Message and Conversation Model](#31-message-and-conversation-model)
     - [3.2 Message Templates](#32-message-templates)
-    - [3.3 Prompt Creation](#33-prompt-creation)
-    - [3.4 Separation of Prompt and LLM API](#34-separation-of-prompt-and-llm-api)
-    - [3.5 Tool Use](#35-tool-use)
-    - [3.6 Sequential Processing](#36-sequential-processing)
+    - [3.3 Conversation Templates](#33-conversation-templates)
+    - [3.4 Response Validation and Handling](#34-response-validation-and-handling)
+    - [3.5 Callers](#35-callers)
+    - [3.6 Tool Integration](#36-tool-integration)
     - [3.7 Agentic Decisions](#37-agentic-decisions)
   - [4. Architecture and Design](#4-architecture-and-design)
   - [4.1 Overview of Architecture](#41-overview-of-architecture)
@@ -67,44 +67,67 @@ Many existing frameworks are either too heavy or too rigid, making them difficul
 
 ### 3.1 Message and Conversation Model
 
-**Message**: This class defines a structured message that includes a role (such as system, user, or assistant) and context (the content of the message). It follows common LLM chat API conventions for compatibility.
-**Conversation**: A container for multiple Message objects, representing a full interaction history. It includes utility methods for converting the message objects into API-compatible formats.
+**Messages** define a structured message using Pydantic that includes a role (system, user, assistant, tool) and content. It follows OpenAI chat API conventions for compatibility.
+Specific message types (SystemMessage, UserMessage, AssistantMessage, ToolResultMessage) provide type safety and role-specific functionality.
+
+A **Conversation** is (a Pydantic model containing) a sequence of Messages. Includes a builder pattern (ConversationBuilder) for easy message chain construction and JSON serialization for API compatibility.
 
 ### 3.2 Message Templates
 
-**MessageTemplate**: Allows users to define standard message formats with placeholders that are filled dynamically. Each template includes the message role and a template string.
-Validation: Before rendering a template into a message, optional validation checks ensure that the provided variables meet predefined criteria.
+**MessageTemplate Protocol**: Defines the interface for message templates with role, template content, and optional validation model.
 
-### 3.3 Prompt Creation
+**Template Types**:
 
-**Prompt**: A composite object that uses multiple MessageTemplate objects to create a complete conversation flow. It manages the logic for generating and structuring messages and enables greater flexibility in designing agent interactions.
+- StaticMessageTemplate: For fixed, non-templated messages
+- StringMessageTemplate: Uses Python's string.Template for basic variable substitution
+- JinjaMessageTemplate: Uses Jinja2 for complex templating with full feature support
+- UserMessageTemplate: Specialized template for user messages with built-in validation
 
-### 3.4 Separation of Prompt and LLM API
+### 3.3 Conversation Templates
 
-**Caller Interface**: The Caller object associates a Prompt with a specific LLM client and call parameters (assumes OpenAI-compatibility through a framework like `aisuite`).
-This allows every Caller instance to use a different model and/or parameters, setting clear expectations for each instance's behavior.
+**ConversationTemplate**: Manages a sequence of MessageTemplates and Messages to create complete conversations. Features include:
 
-**Tool Use**: `yaaal` is designed to use LLM APIs with as minimal a translation layer as possible, enabling advanced features like function-calling and tool use.
-When a tool-call instruction is detected, the Caller can attempt to invoke that call and return the function result as the response.
+- Variable validation across all templates
+- JSON schema generation for API compatibility
+- Consistent rendering of complete conversations
 
-**Callable as Tools**: Callers themselves can be used as functions/tools in tool-calling workflows by exposing their Prompt's input requirements through the `signature()` method.
-Since each Caller has a specific client and model assigned, this enables routing specific tasks to specific models. This composability allows complex workflows where Callers can invoke other Callers.
+### 3.4 Response Validation and Handling
 
-**Response Validation**: The Caller can include optional validation logic to ensure the API response is correct before passing it to the agent.
+**Validators** ensure that LLM responses match expected formats and provide mechanisms for repair.
+Each validator implements methods to:
 
-### 3.5 Tool Use
+- validate(): Check and/or transform the response.
+- repair_instructions(): Generate guidance to fix invalid responses.
 
-**Tool Abstraction**: Tools are functions that provide specialized functionality, such as making an API call or performing a calculation. `yaaal` makes provisions for use of native python functions as well as Callers as tools.
+**Handlers** process LLM responses by validating and optionally repairing them.
+They distinguish between content messages and tool call messages, invoking the appropriate validation logic.
 
-**Tool Signature**: `yaaal` support using native python functions and Callers as tools.
-The `@tool` decorator allows the developer to denote Python functions as callable tools that agents can invoke during their workflows.
-Both `@tool` decorated functions and Caller objects have a `signature()` method that describes the tool inputs as a Pydantic BaseModel
-for easy conversion to json schema, allowing easy integration into LLM tool-calling requests.
+### 3.5 Callers
 
-### 3.6 Sequential Processing
+**Callers** executes LLM requests with enhanced response validation and automatic error recovery.
+They manages message construction via a `ConversationTemplate`, performs API calls with a specified client,
+and validates responses using associated handlers (which may include tool execution).
 
-**Flow**: Flows process a predefined series of steps (Caller | CallableWithSignature) before returning a final response.
-Flows are a special version of Caller and therefore have a tool signature and can be invoked as functions through Callers, Flows, or Agents.
+- Associates templates with specific LLM clients/models
+- Manages API parameters including tool configurations
+- Handles validation and automatic repair attempts
+- Supports function/tool calling workflows
+
+### 3.6 Tool Integration
+
+**Tool Decorator**: Converts Python functions into LLM-compatible tools with:
+
+- Automatic signature extraction
+- Pydantic model generation for validation
+- JSON schema conversion for API compatibility
+
+**Callable Protocol**: `CallableWithSignature` protocol ensures tools provide:
+
+- Pydantic signature model
+- JSON schema
+- Return type information
+
+Native Python functions and Callers are `CallableWithSignature`, therefore Callers can be use as tools for other Callers or Agents.
 
 ### 3.7 Agentic Decisions
 
@@ -117,7 +140,7 @@ create a plan to follow, and determine when to continue or when to revert contro
 ## 4.1 Overview of Architecture
 
 The architecture of `yaaal` is modular and designed for flexibility. The library enables users to create AI agents by combining simple building blocks into a comprehensive agent framework.
-Each component--Message, Conversation, MessageTemplate, Prompt, Caller, Agent --is decoupled to allow for easy composition and modification.
+Each component--Message, Conversation, MessageTemplate, ConversationTemplate, Validator, Handler, Caller, Agent --is decoupled to allow for easy composition and modification.
 
 ### 4.2 Design Patterns and Principles
 
@@ -131,7 +154,13 @@ Each component--Message, Conversation, MessageTemplate, Prompt, Caller, Agent --
 
 ### 4.4 Dependencies and Compatibility
 
-**Core Dependencies**: `yaaal` has minimal dependencies but assumes `aisuite` and `pydantic>=2.10` and optionally uses OpenTelemetry for tracing.
+**Core Dependencies**:
+
+- Python >=3.11
+- pydantic >=2.0
+- aisuite for OpenAI-compatible API access
+- jinja2 for advanced templating
+- Optional: opentelemetry for tracing
 
 **Compatibility**: Works in any standard Python environment (>=3.11) and can be easily integrated with other tools and services. We generally assume we are building for OpenAI API compatibility.
 
