@@ -44,10 +44,9 @@ class ChatCompletion(BaseModel, extra="ignore"):
 
 def convert_response(response: OpenAIChatCompletion | AISuiteChatCompletion) -> ChatCompletion:
     """Unify aisuite response object types."""
-    try:
-        # this is the easy case - OpenAI's pydantic ChatCompletion
+    if isinstance(response, OpenAIChatCompletion):
         return ChatCompletion(**response.model_dump())
-    except Exception:
+    else:
         choices = []
         for choice in response.choices:
             message = ChatCompletionMessage(**choice.message.model_dump())
