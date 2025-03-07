@@ -23,14 +23,15 @@ Prompts provide a 'signature' method to mock a function signature that details a
 from abc import abstractmethod
 import logging
 from string import Template as StringTemplate
-from typing import Any, List, Literal, Mapping, Protocol, Sequence, Type, TypeVar, Union, cast
+from typing import Any, Literal, Mapping, Protocol, Sequence, Type, TypeVar, Union, cast
 
 from jinja2 import StrictUndefined, Template as JinjaTemplate
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from typing_extensions import override, runtime_checkable  # TODO: import from typing when drop support for 3.11
 
 from ..types.base import JSON
-from ..types.core import Conversation, ConversationSpec, Message, MessageSpec, Role
+from ..types.core import Conversation, Message, Role
+from ..types.utils import merge_models
 from ..utilities import to_snake_case
 
 logger = logging.getLogger(__name__)
@@ -293,81 +294,107 @@ class JinjaMessageTemplate(MessageTemplate):
 class ConversationTemplate:
     """Define conversation structure with multiple message templates.
 
-    Manages an arbitrary number of message templates and static messages.
-    Provides parameter validation and JSON schema generation.
+    Manages an ordered sequence of templates/messages with:
+    - Combined parameter validation across all templates
+    - OpenAPI schema generation for tool calling
+    - Consistent rendering of complete conversations
+
+    Args:
+        name: Template name, used as function name in schemas
+        description: Human readable description for documentation
+        conversation_spec: Sequence of templates/messages defining the conversation
 
     Attributes
     ----------
-    name : str
-        Template name; Used as function name when defining signature
-    description : str
-        Human readable description; used as function docstring
-    templates : dict[str, MessageTemplate]
-        Map of template names to templates
-    signature : Type[BaseModel]
-        Pydantic model for parameters
-    schema : JSON
-        OpenAPI-compatible schema
+        signature: Generated Pydantic model for all parameters
+        schema: OpenAPI-compatible JSON schema
     """
 
     def __init__(
         self,
         name: str,
         description: str,
-        templates: list[MessageTemplate],
+        conversation_spec: Sequence[MessageTemplate | Message],
     ):
-        self.name = to_snake_case(name)
+        self.name = name
         self.description = description
-        self.templates = templates
+        self.conversation_spec = conversation_spec
 
-        self.signature = self._get_signature()
-        self.schema = self.signature.model_json_schema()
+        self._signature = self._define_signature()
+        self._schema = cast(JSON, self.signature.model_json_schema())
 
     @property
-    def templates(self) -> Mapping[str, MessageTemplate]:
-        """Get the dictionary of validated templates."""
-        return self._templates
+    def name(self) -> str:
+        """Get the template / function name."""
+        return self._name
 
-    @templates.setter
-    def templates(self, templates: Sequence[MessageTemplate]) -> None:
+    @name.setter
+    def name(self, name: str) -> None:
+        """Set the template / function name."""
+        _name = to_snake_case(name)
+        if _name != name:
+            logger.warning(f"Converted template name '{name}' to '{_name}'")
+        self._name = _name
+
+    @property
+    def description(self) -> str:
+        """Get the template description / function docstring."""
+        return self._description
+
+    @description.setter
+    def description(self, description: str) -> None:
+        """Set the template description / function docstring."""
+        if not description or not isinstance(description, str):
+            raise ValueError("Description must be provided as string for use as docstring")
+        self._description = description
+
+    @property
+    def conversation_spec(self) -> Sequence[MessageTemplate | Message]:
+        """Get the conversation template."""
+        return self._conversation_spec
+
+    @conversation_spec.setter
+    def conversation_spec(self, conversation_spec: Sequence[MessageTemplate | Message]) -> None:
         """Validate and store templates.
 
         Parameters
         ----------
-        templates : Sequence[MessageTemplate]
-            List of MessageTemplates to be validated and converted into a dictionary.
+        conversation_spec : Sequence[MessageTemplate | Message]
+            List of MessageTemplates to be validated.
 
         Raises
         ------
         ValueError
-            If the template list is empty, a template lacks a name or validation model,
-            or if duplicate names exist.
+            If the conversation list is empty.
         """
-        if not templates:
-            raise ValueError("Template list cannot be empty")
-        template_dict = {}
-        for template in templates:
-            if not template.name:
-                raise ValueError(f"Template {template} requires a name")
-            if template.name in template_dict:
-                raise ValueError(f"Duplicate template name '{template.name}' found")
+        if not conversation_spec:
+            raise ValueError("Conversation list cannot be empty")
 
-            if isinstance(template, StaticMessageTemplate):
-                template_dict[template.name] = template
-                continue
+        if not all(isinstance(message, (MessageTemplate, Message)) for message in conversation_spec):
+            raise TypeError("Conversation list must contain only MessageTemplates or Messages")
 
-            if not template.validation_model:
-                raise ValueError(f"Template {template.name} requires a validation model")
+        if not any(message.role == "system" for message in conversation_spec):
+            raise ValueError("Template list must contain at least one system message")
 
-            template_dict[template.name] = template
-        self._templates = template_dict
+        self._conversation_spec = conversation_spec
 
-    def _get_signature(self) -> Type[BaseModel]:
+    @property
+    def signature(self) -> Type[BaseModel]:
+        """Get the Pydantic model for the template signature."""
+        return self._signature
+
+    @property
+    def schema(self) -> JSON:
+        """Get the OpenAPI-compatible schema."""
+        return self._schema
+
+    def _define_signature(self) -> Type[BaseModel]:
         """Define the render() function signature.
 
-        Returns a Pydantic model with a single field 'conversation_spec' which is a list.
-        Each list item is a MessageSpec model dynamically generated per non-static template;
-        the MessageSpec model is parameterized by the template's validation model.
+        Returns a Pydantic model merged from the validation models of each template.
+
+        NOTE: This does not include merged validators and is used solely to generate the function signature;
+        validation is handled by the MessageTemplate.validation_model
 
         Returns
         -------
@@ -379,100 +406,52 @@ class ConversationTemplate:
         ValueError
             If any non-static template lacks a validation model.
         """
-        spec_models = []
-        for name, template in self.templates.items():
+        message_validators = []
+        for template in self.conversation_spec:
+            if not isinstance(template, MessageTemplate):
+                continue
             if isinstance(template, StaticMessageTemplate):
                 continue
             if not template.validation_model:
-                raise ValueError(f"Template {name} requires a validation model")
-            # Each MessageSpec model has a literal 'name' field and a 'vars'
-            # field typed with the template's validation model.
-            msg_spec_model = create_model(
-                f"{name}_MessageSpec",
-                name=(Literal[name], ...),
-                vars=(template.validation_model, ...),
-            )
-            spec_models.append(msg_spec_model)
+                raise ValueError("All non-static templates require a validation model")
 
-        if not spec_models:
-            # Fallback: no non-static templates yields an empty signature.
+            message_validators.append(template.validation_model)
+
+        if len(message_validators) == 0:
             return create_model(self.name, __doc__=self.description)
 
-        MessageSpecUnion = Union[tuple(spec_models)]  # NOQA: N806 # type: ignore
+        return merge_models(*message_validators, name=self.name, description=self.description)
 
-        model = create_model(
-            self.name,
-            __doc__=self.description,
-            __config__=ConfigDict(extra="forbid"),
-            messages=(List[MessageSpecUnion], ...),
-        )
-        return model
-
-    def _validate_conversation_spec(
-        self,
-        conversation_spec: ConversationSpec
-        | dict[str, list[dict[str, dict[str, Any] | BaseModel | None]]]
-        | list[dict[str, dict[str, Any] | BaseModel | None]],
-    ) -> ConversationSpec:
-        """Validate (and coerce) a conversation_spec input into a ConversationSpec instance.
-
-        Parameters
-        ----------
-        conversation_spec : ConversationSpec or list[dict[str, dict[str, Any] | BaseModel]]
-            The conversation specification provided by the user.
-
-        Returns
-        -------
-        ConversationSpec
-            A validated ConversationSpec instance containing message instructions.
-
-        Raises
-        ------
-        ValueError
-            If any instruction does not contain exactly one template name and vars pair.
+    def render(self, template_vars: dict[str, Any]) -> Conversation:
         """
-        if isinstance(conversation_spec, ConversationSpec):
-            return conversation_spec
+        Render a complete Conversation using the provided variables.
 
-        if isinstance(conversation_spec, dict):
-            return ConversationSpec(**conversation_spec)
-
-        messages = []
-        for item in conversation_spec:
-            if len(item) != 1:
-                raise ValueError("Each instruction must have exactly one template name and vars pair")
-            name, vars_ = next(iter(item.items()))
-            messages.append(MessageSpec(name=name, vars=vars_))
-        return ConversationSpec(messages=messages)
-
-    def render(
-        self, conversation_spec: ConversationSpec | list[dict[str, dict[str, Any] | BaseModel]]
-    ) -> Conversation:
-        """Render a Conversation by applying each template with its variables.
-
-        The method first validates the conversation specification then renders each message
-        using the corresponding template. The messages are returned in the order provided.
+        Each message template in the conversation specification is validated and rendered
+        using the variables from 'template_vars'. The resulting messages are assembled in order
+        into a Conversation object.
 
         Parameters
         ----------
-        conversation_spec : ConversationSpec or list[dict[str, dict[str, Any] | BaseModel]]
-            A ConversationSpec instance or a list of dictionaries mapping a template name
-            to its variables.
+        template_vars : dict[str, Any]
+            A dictionary of variables used for rendering the message templates.
 
         Returns
         -------
         Conversation
-            A Conversation instance containing the rendered messages in instruction order.
+            An instance containing all rendered messages in the defined order.
 
         Raises
         ------
         ValueError
-            If a referenced template is not found in the template dictionary.
+            If a template cannot render a message due to missing or invalid variables.
         """
-        spec = self._validate_conversation_spec(conversation_spec)
         messages = []
-        for msg_spec in spec.messages:
-            if msg_spec.name not in self.templates:
-                raise ValueError(f"Template '{msg_spec.name}' not found")
-            messages.append(self.templates[msg_spec.name].render(msg_spec.vars))
+        for msg in self.conversation_spec:
+            if isinstance(msg, MessageTemplate):
+                messages.append(msg.render(template_vars))
+            elif isinstance(msg, Message):
+                messages.append(msg)
+            else:
+                raise TypeError(f"Invalid message type: {msg}")
+
         return Conversation(messages=messages)
