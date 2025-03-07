@@ -135,6 +135,26 @@ class StringMessageTemplate(MessageTemplate):
         self._template = template if isinstance(template, StringTemplate) else StringTemplate(template)
 
     # NOTE: it would be cool to autogenerate a Pydanic model for template variables, but I don't think the complexity is worth it
+    @property
+    def validation_model(self) -> Type[BaseModel] | None:
+        """Pydantic model for validating template variables."""
+        return self._validation_model
+
+    @validation_model.setter
+    def validation_model(self, validation_model: Type[BaseModel] | None):
+        if validation_model is not None and issubclass(validation_model, BaseModel):
+            try:
+                if validation_model.model_config.get("extra", "ignore") != "ignore":
+                    logger.warning(
+                        "validation_model should set extra='ignore' config or unhandled edge cases may occur."
+                    )
+            except KeyError:
+                pass
+
+            self._validation_model = validation_model
+
+        else:
+            self._validation_model = None
 
     @override
     def render(self, template_vars: dict[str, Any] | BaseModel) -> Message:
@@ -233,6 +253,27 @@ class JinjaMessageTemplate(MessageTemplate):
                 template,
                 undefined=StrictUndefined,
             )
+
+    @property
+    def validation_model(self) -> Type[BaseModel] | None:
+        """Pydantic model for validating template variables."""
+        return self._validation_model
+
+    @validation_model.setter
+    def validation_model(self, validation_model: Type[BaseModel] | None):
+        if validation_model is not None and issubclass(validation_model, BaseModel):
+            try:
+                if validation_model.model_config.get("extra", "ignore") != "ignore":  # default is ignore
+                    logger.warning(
+                        "validation_model should set extra='ignore' config or unhandled edge cases may occur."
+                    )
+            except KeyError:
+                pass
+
+            self._validation_model = validation_model
+
+        else:
+            self._validation_model = None
 
     @override
     def render(self, template_vars: dict[str, Any] | BaseModel) -> Message:
