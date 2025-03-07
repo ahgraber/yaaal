@@ -134,16 +134,3 @@ class Conversation(BaseModel):
         Conversation(messages=[...])
         """
         return ConversationBuilder()
-
-
-class MessageSpec(BaseModel):
-    name: str = Field(description="The template name to use")
-    vars: dict[str, Any] | BaseModel | None = Field(
-        description="The variables to use when rendering the template", default={}
-    )
-
-
-class ConversationSpec(BaseModel):
-    messages: list[MessageSpec] = Field(
-        description="Specification for how to render the messages of the conversation.", min_length=1
-    )
