@@ -8,10 +8,9 @@ resolution-markers = [
 
 [[package]]
 name = "aisuite"
-version = "0.1.7"
-source = { git = "https://github.com/andrewyng/aisuite#bd6b23fd72b3a391d96659b7faf5cdaed6a415dc" }
+version = "0.1.10"
+source = { git = "https://github.com/andrewyng/aisuite?rev=9dc9ae9a45470f6632e85d2f53087b84510c25f3#9dc9ae9a45470f6632e85d2f53087b84510c25f3" }
 dependencies = [
-    { name = "docstring-parser" },
     { name = "httpx" },
 ]
 
@@ -449,11 +448,11 @@ wheels = [
 
 [[package]]
 name = "docstring-parser"
-version = "0.14.1"
+version = "0.16"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/89/a9/b4f5b20cf96ed729dba274372e0e7cddf5aa1097bd5313d3cb074acb8854/docstring_parser-0.14.1.tar.gz", hash = "sha256:2c77522e31b7c88b1ab457a1f3c9ae38947ad719732260ba77ee8a3deb58622a", size = 24405 }
+sdist = { url = "https://files.pythonhosted.org/packages/08/12/9c22a58c0b1e29271051222d8906257616da84135af9ed167c9e28f85cb3/docstring_parser-0.16.tar.gz", hash = "sha256:538beabd0af1e2db0146b6bd3caa526c35a34d61af9fd2887f3a8a27a739aa6e", size = 26565 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/d0/106db829d226c2a2e9fdac490d466062559d29fd127ef3f1898625fe77b7/docstring_parser-0.14.1-py3-none-any.whl", hash = "sha256:14ac6ec1f1ba6905c4d8cb90fd0bc55394f5678183752c90e44812bf28d7a515", size = 33095 },
+    { url = "https://files.pythonhosted.org/packages/d5/7c/e9fcff7623954d86bdc17782036cbf715ecab1bec4847c008557affe1ca8/docstring_parser-0.16-py3-none-any.whl", hash = "sha256:bf0a1387354d3691d102edef7ec124f219ef639982d096e26e3b60aeffa90637", size = 36533 },
 ]
 
 [[package]]
@@ -2224,6 +2223,7 @@ dependencies = [
     { name = "aisuite", extra = ["all"] },
     { name = "asyncio" },
     { name = "chardet" },
+    { name = "docstring-parser" },
     { name = "json-repair" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -2252,9 +2252,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aisuite", extras = ["all"], git = "https://github.com/andrewyng/aisuite" },
+    { name = "aisuite", extras = ["all"], git = "https://github.com/andrewyng/aisuite?rev=9dc9ae9a45470f6632e85d2f53087b84510c25f3" },
     { name = "asyncio", specifier = ">=3.4.3" },
     { name = "chardet", specifier = ">=5.2" },
+    { name = "docstring-parser", specifier = ">=0.16" },
     { name = "json-repair", specifier = ">=0.35" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7.1" },

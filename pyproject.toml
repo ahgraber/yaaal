@@ -17,9 +17,10 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "aisuite[all]>=0.1.7",
+  "aisuite[all]>=0.1.9",
   "asyncio>=3.4.3",
   "chardet>=5.2",
+  "docstring-parser>=0.16",
   "json-repair>=0.35",
   "pydantic>=2.10",
   "pydantic-settings>=2.7.1",
@@ -118,4 +119,4 @@ prerelease = "if-necessary-or-explicit"
 
 [tool.uv.sources]
 yaaal = { path = "src/yaaal", editable = true }
-aisuite = { git = "https://github.com/andrewyng/aisuite" }
+aisuite = { git = "https://github.com/andrewyng/aisuite", rev = "9dc9ae9a45470f6632e85d2f53087b84510c25f3" }
