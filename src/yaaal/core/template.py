@@ -23,11 +23,11 @@ Prompts provide a 'signature' method to mock a function signature that details a
 from abc import abstractmethod
 import logging
 from string import Template as StringTemplate
-from typing import Any, List, Literal, Mapping, Protocol, Sequence, Type, Union
+from typing import Any, List, Literal, Mapping, Protocol, Sequence, Type, TypeVar, Union, cast
 
 from jinja2 import StrictUndefined, Template as JinjaTemplate
-from pydantic import BaseModel, ConfigDict, create_model
-from typing_extensions import override  # TODO: import from typing when drop support for 3.11
+from pydantic import BaseModel, ConfigDict, Field, create_model
+from typing_extensions import override, runtime_checkable  # TODO: import from typing when drop support for 3.11
 
 from ..types.base import JSON
 from ..types.core import Conversation, ConversationSpec, Message, MessageSpec, Role
@@ -36,6 +36,7 @@ from ..utilities import to_snake_case
 logger = logging.getLogger(__name__)
 
 
+@runtime_checkable
 class MessageTemplate(Protocol):
     """Base class for rendering a Message.
 
@@ -44,13 +45,11 @@ class MessageTemplate(Protocol):
 
     Attributes
     ----------
-        name (str | None): Name used to identify template
-        role (Role): Role used in rendered Message (system/user/assistant)
-        template (Any): Template defining message content structure
-        validation_model (Type[BaseModel] | None): Pydantic model for variable validation
+        role: The role (system/user/assistant) for rendered messages
+        template: The template definition that structures message content
+        validation_model: Optional Pydantic model for validating variables
     """
 
-    name: str | None
     role: Role
     template: Any
     validation_model: Type[BaseModel] | None
@@ -67,9 +66,9 @@ class StaticMessageTemplate(MessageTemplate):
     Ignores any template variables passed during rendering.
 
     Args:
-        name (str | None): Name used to identify template
-        role (Role): Role used in rendered Message (system/user/assistant)
-        template (str): Static message content
+        role: The role for rendered messages
+        template: The fixed message content to use
+        validation_model: Not used, always None
 
     Examples
     --------
@@ -82,10 +81,8 @@ class StaticMessageTemplate(MessageTemplate):
         self,
         role: Role,
         template: str,
-        name: str | None = None,
         validation_model: None = None,
     ):
-        self.name = to_snake_case(name) if name else None
         self.role = role
         self.template = template
         self.validation_model = None
@@ -105,10 +102,9 @@ class StringMessageTemplate(MessageTemplate):
     - Strict variable substitution (raises KeyError for missing vars)
 
     Args:
-        name (str | None): Name used to identify template
-        role (Role): Role used in rendered Message (system/user/assistant)
-        template (str): Template string using $-based substitution
-        validation_model (Type[BaseModel]): Pydantic model for validation
+        role: The role for rendered messages
+        template: Template string using $-based substitution
+        validation_model: Optional Pydantic model for variable validation
 
     Examples
     --------
@@ -123,10 +119,8 @@ class StringMessageTemplate(MessageTemplate):
         self,
         role: Role,
         template: str,
-        name: str | None = None,
         validation_model: Type[BaseModel] | None = None,
     ):
-        self.name = to_snake_case(name) if name else None
         self.role = role
         self.template = template
         self.validation_model = validation_model
@@ -166,9 +160,8 @@ class PassthroughMessageTemplate(StringMessageTemplate):
     - Using simple string substitution
 
     Args:
-        name (str | None): Name used to identify template
-        role (Role): Role used in rendered Message (system/user/assistant)
-        template (str): Always '$content' (enforced)
+        role (Role): Always 'user' (enforced)
+        template (str): Always '$user' (enforced)
         validation_model (Type[BaseModel]): Ignored, auto-generated
 
     Examples
@@ -182,22 +175,12 @@ class PassthroughMessageTemplate(StringMessageTemplate):
     def __init__(
         self,
         role: Literal["user"] = "user",
-        template: str = "$content",
-        name: str | None = None,
+        template: str = "$user",
         validation_model: Type[BaseModel] | None = None,
     ):
-        self.name = to_snake_case(name) if name else None
         self.role = "user"
-        self.template = "$content"
-        self.validation_model = create_model(self.name if self.name else "PassthroughModel", content=(str, ...))
-
-    @override
-    def render(self, template_vars: dict[str, Any] | BaseModel) -> Message:
-        """Render the message."""
-        vars_ = template_vars if isinstance(template_vars, dict) else template_vars.model_dump()
-
-        validated_vars = self.validation_model(**vars_).model_dump()
-        return Message(role=self.role, content=self.template.substitute(validated_vars))
+        self.template = "$user"
+        self._validation_model = create_model("UserMessage", user=(str, ...))
 
 
 class JinjaMessageTemplate(MessageTemplate):
@@ -207,10 +190,9 @@ class JinjaMessageTemplate(MessageTemplate):
     Uses StrictUndefined to catch missing variables.
 
     Args:
-        name (str | None): Name used to identify template
-        role (Role): Role used in rendered Message (system/user/assistant)
-        template (str | JinjaTemplate): Template string or Jinja template
-        validation_model (Type[BaseModel]): Pydantic model for variables
+        role: The role for rendered messages
+        template: Jinja template string or Template instance
+        validation_model: Optional Pydantic model for variable validation
 
     Examples
     --------
@@ -229,10 +211,8 @@ class JinjaMessageTemplate(MessageTemplate):
         self,
         role: Role,
         template: str | JinjaTemplate,
-        name: str | None = None,
         validation_model: Type[BaseModel] | None = None,
     ):
-        self.name = to_snake_case(name) if name else None
         self.role = role
         self.template = template
         self.validation_model = validation_model
