@@ -3,8 +3,8 @@ from pydantic import BaseModel, Field
 from ..core.template import (
     ConversationTemplate,
     JinjaMessageTemplate,
-    PassthroughMessageTemplate,
     StringMessageTemplate,
+    UserMessageTemplate,
 )
 from ..tools.web import URLContent
 
@@ -55,13 +55,12 @@ class SummarizerUserVars(BaseModel):
 summarizer_prompt = ConversationTemplate(
     name="Summarizer",
     description="Generate a summary of provided content",
-    templates=[
+    conversation_spec=[
         JinjaMessageTemplate(
-            name="System Instructions",
             role="system",
             template=summarizer_prompt_template,
             validation_model=SummarizerSystemVars,
         ),
-        PassthroughMessageTemplate(name="User request"),
+        UserMessageTemplate(),
     ],
 )

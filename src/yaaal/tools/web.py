@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, create_model
 
 import requests
 
-from ..core.tools import tool
+from ..core.tool import tool
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +42,6 @@ def get_page_content(url: str, timeout: int = 30) -> URLContent:
         raise
 
     return URLContent(**content)
+
+
+# TODO: jina deepsearch or exa search
