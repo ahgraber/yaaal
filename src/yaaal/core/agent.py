@@ -18,16 +18,22 @@ Therefore, an Agent must:
 
 import json
 import logging
-from typing import Any, Match, Pattern, Type
+from typing import Match, Pattern, Type
 
 import json_repair
 from pydantic import BaseModel, Field
 
-from .caller import BaseCaller
-from .prompt import Prompt
-from .tools import CallableWithSignature, respond_as_tool
-from ..types.base import JSON
-from ..types.core import Conversation, Message, ToolMessage
+from .caller import Caller
+from .template import (
+    ConversationTemplate,
+    JinjaMessageTemplate,
+    StaticMessageTemplate,
+    StringMessageTemplate,
+    UserMessageTemplate,
+)
+from .tool import CallableWithSignature
+from ..types_.base import JSON
+from ..types_.core import Conversation, Message, ToolResultMessage
 
 logger = logging.getLogger(__file__)
 
