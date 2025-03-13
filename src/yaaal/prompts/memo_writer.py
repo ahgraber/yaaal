@@ -5,8 +5,8 @@ from .summarizer import Summary
 from ..core.template import (
     ConversationTemplate,
     JinjaMessageTemplate,
-    PassthroughMessageTemplate,
     StringMessageTemplate,
+    UserMessageTemplate,
 )
 from ..tools.web import URLContent
 
@@ -71,13 +71,12 @@ class MemoWriterUserVars(BaseModel):
 memowriter_prompt = ConversationTemplate(
     name="Memo Writer",
     description="Generate a summary of provided content",
-    templates=[
+    conversation_spec=[
         JinjaMessageTemplate(
-            name="System Instructions",
             role="system",
             template=MemoWriter_prompt_template,
             validation_model=MemoWriterSystemVars,
         ),
-        PassthroughMessageTemplate(name="User request"),
+        UserMessageTemplate(),
     ],
 )

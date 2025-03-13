@@ -2,32 +2,35 @@ from pydantic import BaseModel, Field
 
 from .extractor import Extract
 from .summarizer import Summary
-from ..core.prompt import (
+from ..core.template import (
+    ConversationTemplate,
     JinjaMessageTemplate,
-    PassthroughMessageTemplate,
-    Prompt,
     StringMessageTemplate,
+    UserMessageTemplate,
 )
 
 
 # --------------------------------------------------------------
-# CoT -> Caller
-class Step(BaseModel):
+# CoT
+class CoTStep(BaseModel):
     explanation: str
     output: str
 
 
-class Reasoning(BaseModel):
-    steps: list[Step]
+class CoT(BaseModel):
+    steps: list[CoTStep]
     final_answer: str
 
 
+# --------------------------------------------------------------
 # ReACT
-class Step(BaseModel):
+# action is a tool invocation; implies ReACT is a graph not a prompt
+class ReACTStep(BaseModel):
     thought: str
     action: str
     observation: str
 
 
-# Reflexion
-class Reflect(BaseModel): ...
+class ReACT(BaseModel):
+    steps: list[ReACTStep]
+    final_answer: str
