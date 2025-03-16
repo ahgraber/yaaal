@@ -46,6 +46,9 @@ test = [
   "pytest-responses>=0.5.1",
   "responses>=0.25.3",
 ]
+tools = [
+  "gitingest>=0.1.4",
+]
 
 [tool.hatch.version]
 path = "./src/VERSION"
