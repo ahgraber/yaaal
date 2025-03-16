@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -305,6 +306,18 @@ wheels = [
 ]
 
 [[package]]
+name = "click"
+version = "8.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/2e/0090cbf739cee7d23781ad4b89a9894a41538e4fcf4c31dcdd705b78eb8b/click-8.1.8.tar.gz", hash = "sha256:ed53c9d8990d83c2a27deae68e4ee337473f6330c040a31d4225c9574d16096a", size = 226593 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/d4/7ebdbd03970677812aac39c869717059dbb71a4cfc033ca6e5221787892c/click-8.1.8-py3-none-any.whl", hash = "sha256:63c132bbbed01578a06712a2d1f497bb62d9c1c0d329b7903a866228027263b2", size = 98188 },
+]
+
+[[package]]
 name = "cohere"
 version = "5.13.11"
 source = { registry = "https://pypi.org/simple" }
@@ -524,6 +537,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/11/de70dee31455c546fbc88301971ec03c328f3d1138cfba14263f651e9551/fsspec-2024.12.0.tar.gz", hash = "sha256:670700c977ed2fb51e0d9f9253177ed20cbde4a3e5c0283cc5385b5870c8533f", size = 291600 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/de/86/5486b0188d08aa643e127774a99bac51ffa6cf343e3deb0583956dca5b22/fsspec-2024.12.0-py3-none-any.whl", hash = "sha256:b520aed47ad9804237ff878b504267a3b0b441e97508bd6d2d8774e3db85cee2", size = 183862 },
+]
+
+[[package]]
+name = "gitingest"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "tiktoken" },
+    { name = "tomli" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/ff/d94a7dd5ce2437efa020d57cd5eb8d1f9ac31c6bf8c4ce98dab63890f549/gitingest-0.1.4.tar.gz", hash = "sha256:b3e537bb38152c48084dcb745e4d32665271a5f16306182628c69d39f615e427", size = 40590 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/2b/df9747f305cd384c36b791121b150ab00d399e20b0b679f0966d3e6588a7/gitingest-0.1.4-py3-none-any.whl", hash = "sha256:0f61f8a98aa527613fde5c3ae13243f42c2e9698fbbe7c0794f19bc62eedc093", size = 40826 },
 ]
 
 [[package]]
@@ -2217,7 +2244,6 @@ wheels = [
 
 [[package]]
 name = "yaaal"
-version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "aisuite", extra = ["all"] },
@@ -2248,6 +2274,9 @@ test = [
     { name = "pytest-playwright" },
     { name = "pytest-responses" },
     { name = "responses" },
+]
+tools = [
+    { name = "gitingest" },
 ]
 
 [package.metadata]
@@ -2281,3 +2310,4 @@ test = [
     { name = "pytest-responses", specifier = ">=0.5.1" },
     { name = "responses", specifier = ">=0.25.3" },
 ]
+tools = [{ name = "gitingest", specifier = ">=0.1.4" }]
