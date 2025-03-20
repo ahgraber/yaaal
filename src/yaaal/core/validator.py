@@ -18,17 +18,15 @@ import json_repair
 from pydantic import BaseModel
 from typing_extensions import override, runtime_checkable
 
-from .base import Validator, ValidatorReturnType
+from .base import CallableWithSignature, Validator, ValidatorReturnType
 from .exceptions import ValidationError
-from .tool import CallableWithSignature
+from .tool import Tool
 from ..types_.core import (
     AssistantMessage,
     Conversation,
     UserMessage,
 )
-from ..types_.openai_compat import (
-    ChatCompletionMessageToolCall,
-)
+from ..types_.openai_compat import ChatCompletionMessageToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +191,7 @@ class ToolValidator(Validator[BaseModel]):
         ValidationError: If the tool name is not found or the arguments are invalid.
     """
 
-    def __init__(self, toolbox: list[CallableWithSignature]):
+    def __init__(self, toolbox: list[CallableWithSignature | Tool]):
         """Initialize the ToolValidator with a toolbox of callable tools.
 
         Args:
@@ -214,7 +212,7 @@ class ToolValidator(Validator[BaseModel]):
         return self._toolbox
 
     @toolbox.setter
-    def toolbox(self, toolbox: list[CallableWithSignature]):
+    def toolbox(self, toolbox: list[CallableWithSignature | Tool]):
         """Register tools by mapping their names to the callable."""
         tb = {}
         for tool in toolbox:
@@ -249,6 +247,7 @@ class ToolValidator(Validator[BaseModel]):
         """
         name = completion.function.name
         arguments = completion.function.arguments
+
         try:
             return self.toolbox[name].signature.model_validate(json_repair.loads(arguments))
         except KeyError as e:
@@ -267,17 +266,17 @@ class ToolValidator(Validator[BaseModel]):
             A Conversation with instructions for correcting the tool call.
         """
         function = completion.function
+
+        repair_instructions = textwrap.dedent(
+            f"""
+            Validation failed: {error}
+            Please update your response to conform to the following schema for function '{function.name}':
+            {json.dumps(self.toolbox[function.name].schema)}
+            """.strip()
+        )
         return Conversation(
             messages=[
                 AssistantMessage(content=json.dumps(completion.function.model_dump())),
-                UserMessage(
-                    content=textwrap.dedent(
-                        f"""
-                        Validation failed: {error}
-                        Please update your response to conform to the following schema for function '{function.name}':
-                        {json.dumps(self.toolbox[function.name].schema)}
-                        """.strip()
-                    ),
-                ),
+                UserMessage(content=repair_instructions),
             ]
         )

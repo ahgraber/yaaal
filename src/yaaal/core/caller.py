@@ -23,7 +23,7 @@ from .base import CallableReturnType, CallableWithSignature
 from .exceptions import ValidationError
 from .handler import ResponseHandler, ToolHandler  # , CompositeHandler
 from .template import ConversationTemplate
-from .tool import anthropic_pydantic_function_tool
+from .tool import Tool, anthropic_pydantic_function_tool
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types_.base import JSON
 from ..types_.core import Conversation, Message, UserMessage
@@ -314,7 +314,7 @@ def create_tool_caller(
     client: Client,
     model: str,
     conversation_template: ConversationTemplate,
-    toolbox: list[CallableWithSignature],
+    toolbox: list[CallableWithSignature | Tool],
     request_params: dict[str, JSON] | None = None,
     auto_invoke: bool = False,
 ) -> Caller:
