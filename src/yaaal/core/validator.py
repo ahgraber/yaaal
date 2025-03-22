@@ -16,9 +16,9 @@ from typing import Pattern
 
 import json_repair
 from pydantic import BaseModel
-from typing_extensions import override, runtime_checkable
+from typing_extensions import override
 
-from .base import CallableWithSignature, Validator, ValidatorReturnType
+from .base import CallableWithSignature, Validator
 from .exceptions import ValidationError
 from .tool import Tool
 from ..types_.core import (

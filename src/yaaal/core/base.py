@@ -12,7 +12,7 @@ import logging
 from typing import Generic, Protocol, Type, Union
 
 from pydantic import BaseModel
-from typing_extensions import TypeAlias, TypeVar, runtime_checkable
+from typing_extensions import TypeVar, runtime_checkable
 
 from ..types_.base import JSON
 from ..types_.core import Conversation, Message

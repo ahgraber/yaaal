@@ -1,9 +1,8 @@
 """Components for composable LLM calls.
 
 Handlers process LLM responses by validating and optionally repairing them.
-They distinguish between content messages and tool call messages, invoking the appropriate validation logic.
 This module provides:
-- ResponseHandler: For handling plain text responses.
+- ResponseHandler: For validating plaintext responses.
 - ToolHandler: For processing tool calls with validation and optional function execution.
 """
 
@@ -178,10 +177,10 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
         params : BaseModel
             The validated parameters to pass to the tool
         """
-        tool = self.validator.toolbox[function.name]
+        fn = self.validator.toolbox[function.name]
 
         logger.debug(f"Invoking {function.name} with params: {params}")
-        result = tool(**params.model_dump())
+        result = fn(**params.model_dump())
         if isinstance(result, BaseModel):
             # !!!NOTE!!!
             # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
