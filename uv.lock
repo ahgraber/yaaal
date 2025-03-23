@@ -596,6 +596,18 @@ wheels = [
 ]
 
 [[package]]
+name = "griffe"
+version = "1.6.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2f/f2/b00eb72b853ecb5bf31dd47857cdf6767e380ca24ec2910d43b3fa7cc500/griffe-1.6.2.tar.gz", hash = "sha256:3a46fa7bd83280909b63c12b9a975732a927dd97809efe5b7972290b606c5d91", size = 392836 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/bc/bd8b7de5e748e078b6be648e76b47189a9182b1ac1eb7791ff7969f39f27/griffe-1.6.2-py3-none-any.whl", hash = "sha256:6399f7e663150e4278a312a8e8a14d2f3d7bd86e2ef2f8056a1058e38579c2ee", size = 128638 },
+]
+
+[[package]]
 name = "groq"
 version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2250,6 +2262,7 @@ dependencies = [
     { name = "asyncio" },
     { name = "chardet" },
     { name = "docstring-parser" },
+    { name = "griffe" },
     { name = "json-repair" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -2285,6 +2298,7 @@ requires-dist = [
     { name = "asyncio", specifier = ">=3.4.3" },
     { name = "chardet", specifier = ">=5.2" },
     { name = "docstring-parser", specifier = ">=0.16" },
+    { name = "griffe", specifier = ">=1.6.2" },
     { name = "json-repair", specifier = ">=0.35" },
     { name = "pydantic", specifier = ">=2.10" },
     { name = "pydantic-settings", specifier = ">=2.7.1" },

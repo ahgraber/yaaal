@@ -21,6 +21,7 @@ dependencies = [
   "asyncio>=3.4.3",
   "chardet>=5.2",
   "docstring-parser>=0.16",
+  "griffe>=1.6.2",
   "json-repair>=0.35",
   "pydantic>=2.10",
   "pydantic-settings>=2.7.1",
