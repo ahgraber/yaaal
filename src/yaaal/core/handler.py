@@ -160,8 +160,7 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
                 return self._invoke(function, validated)
 
         elif msg.content:
-            # NOTE: Current assumption is that non-tool-calls are chat responses that do not need validation
-            # TODO: Revisit this assumption
+            logger.warning("ToolHandler handled 'message.content' instead of tool call. This should not happen.")
             return msg.content
 
         else:
