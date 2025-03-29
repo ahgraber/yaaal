@@ -15,9 +15,15 @@ from typing import Generic
 from pydantic import BaseModel
 from typing_extensions import override, runtime_checkable
 
-from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator, ValidatorReturnType
+from .base import (
+    CallableWithSchema,
+    ContentHandlerReturnType,
+    Handler,
+    ToolHandlerReturnType,
+    Validator,
+    ValidatorReturnType,
+)
 from .exceptions import ResponseError
-from .tool import CallableWithSignature
 from .validator import PassthroughValidator, ToolValidator
 from ..types_.base import JSON
 from ..types_.core import AssistantMessage, Conversation, UserMessage

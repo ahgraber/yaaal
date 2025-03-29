@@ -9,13 +9,13 @@ Callables expose a typed interface via a Pydantic model for input validation.
 from __future__ import annotations
 
 import logging
-from typing import Generic, Protocol, Type, Union
+from typing import Any, Generic, Protocol, Type, Union
 
 from pydantic import BaseModel
 from typing_extensions import TypeVar, runtime_checkable
 
 from ..types_.base import JSON
-from ..types_.core import Conversation, Message
+from ..types_.core import Conversation, FunctionSchema, Message
 from ..types_.openai_compat import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -122,36 +122,29 @@ class Handler(Generic[ContentHandlerReturnType, ToolHandlerReturnType], Protocol
 
 
 @runtime_checkable
-class CallableWithSignature(Generic[CallableReturnType], Protocol):
-    """Protocol for callables that expose a Pydantic validated signature.
+class CallableWithSchema(Generic[CallableReturnType], Protocol):
+    """Protocol for callables that provide a validated function interface.
+
+    This protocol defines a callable object that exposes metadata about its
+    input/output structure through schemas and type information. It ensures
+    that function calls are properly validated using Pydantic models and
+    JSON schemas.
 
     Attributes
     ----------
-    signature : Type[BaseModel]
-        A Pydantic model that defines the structure and types of input parameters.
-    schema : JSON
-        A JSON schema derived from the signature for external validation.
+    function_schema : FunctionSchema
+        The internal function schema defining parameter names, types and descriptions.
     returns : Type[CallableReturnType]
-        The type that the callable is expected to return.
+        The expected return type of the callable.
     """
 
-    signature: Type[BaseModel]
-    schema: JSON
+    function_schema: FunctionSchema
     returns: Type[CallableReturnType]
 
     def __call__(self, *args, **kwargs) -> CallableReturnType:
-        """Execute the callable with validated inputs.
-
-        Parameters
-        ----------
-        *args :
-            Positional arguments.
-        **kwargs :
-            Keyword arguments.
-
-        Returns
-        -------
-        CallableReturnType
-            The result of executing the callable.
-        """
+        """Execute with validated parameters."""
         ...
+
+    # def validate_return_type(self, value: Any) -> CallableReturnType:
+    #     """Validate return value against specified type."""
+    #     ...

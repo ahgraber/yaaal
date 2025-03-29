@@ -9,6 +9,7 @@ and validates responses using associated handlers (which may include tool execut
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from string import Template as StringTemplate
@@ -20,60 +21,94 @@ from typing_extensions import override, runtime_checkable
 
 from aisuite import Client
 
-from .base import CallableReturnType, CallableWithSignature
+from .base import CallableReturnType, CallableWithSchema
 from .exceptions import ValidationError
 from .handler import ResponseHandler, ToolHandler
-from .tool import Tool
+from .tool import Tool, function_schema, pydantic_to_schema
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types_.base import JSON
-from ..types_.core import Conversation, SystemMessage, UserMessage
+from ..types_.core import Conversation, FunctionSchema, SystemMessage, UserMessage
 from ..types_.openai_compat import ChatCompletion, convert_response
 from ..utilities import to_snake_case
 
 logger = logging.getLogger(__name__)
 
 
-class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnType]):
-    """Executes LLM requests with validation and automated error recovery.
+class Caller(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]):
+    """Protocol for callables that provide validated LLM interactions.
 
-    Manages the full lifecycle of LLM interactions including:
-    - Constructing conversation messages from prompt templates and inputs
-    - Executing API requests and converting responses
-    - Optionally invoking tools based on the response
-    - Validating responses
-    - Performing automatic repair attempts in case of validation errors
-
-    Attributes
-    ----------
-        client (Client): client for OpenAI-compatible API.
-        model (str): Identifier for the model (e.g., "gpt-4o").
-        name (str): Name of the caller.
-        description (str): Description of the caller's purpose.
-        instruction (Template | str): The instruction template for system messages.
-        input_template (Template | None): Optional user template. If provided, the input string will be passed to the template using the `input` template variable.
-        input_params (BaseModel):Pydantic baseModel that defines expectations for template inputs.
-        output_validator (BaseModel | Pattern | None): Validator for output messages.
-        request_params (dict[str, JSON]): Additional API request parameters.
-        max_repair_attempts (int): Maximum allowed repair iterations.
+    This class implements the CallableWithSchema protocol to provide a standard
+    interface for LLM operations. It manages the full lifecycle of LLM interactions
+    including prompt rendering, API calls, response validation, and error recovery.
     """
 
     def __init__(
         self,
         client: Client,
         model: str,
-        # name: str | None = None,
         description: str,
         instruction: StringTemplate | JinjaTemplate | str,
         input_template: StringTemplate | JinjaTemplate | None = None,
         input_params: Type[BaseModel] | None = None,
         request_params: dict[str, JSON] | None = None,
-        tools: list[CallableWithSignature | Tool] | None = None,
+        tools: list[CallableWithSchema] | None = None,
         auto_invoke: bool = False,
         output_validator: Type[BaseModel] | Pattern | None = None,
         max_repair_attempts: int = 2,
     ):
+        """Initialize a Caller with LLM configuration and validation settings.
+
+        Parameters
+        ----------
+        client : Client
+            OpenAI-compatible API client
+        model : str
+            Model identifier (e.g. 'openai:gpt-4')
+        description : str
+            Description of the caller's purpose
+        instruction : StringTemplate | JinjaTemplate | str
+            Template for system messages
+        input_template : StringTemplate | JinjaTemplate | None, optional
+            Template for user messages, by default None
+        input_params : Type[BaseModel] | None, optional
+            Input validation model, by default None
+        request_params : dict[str, JSON] | None, optional
+            Additional API parameters, by default None
+        tools : list[CallableWithSchema | Tool] | None, optional
+            Available tools for function calling, by default None
+        auto_invoke : bool, optional
+            Whether to auto-invoke tools, by default False
+        output_validator : Type[BaseModel] | Pattern | None, optional
+            Validator for responses, by default None
+        max_repair_attempts : int, optional
+            Maximum repair attempts, by default 2
+
+        Raises
+        ------
+        ValueError
+            If templates are used without input_params
+        """
+        # Initialize remaining attributes
         self.name = to_snake_case(self.__class__.__name__)
         self.description = description
+
+        # Create function schema
+        self.function_schema = FunctionSchema(
+            pydantic_model=input_params
+            or create_model(
+                self.name,
+                __doc__=description,
+                input=(str, ...),
+            ),
+            json_schema=pydantic_to_schema(input_params) if input_params else {},
+            signature=inspect.signature(self.__call__),
+        )
+
+        # Set returns from type hints
+        self.returns = get_type_hints(
+            self.__class__.__call__,
+            self.__class__.__call__.__globals__,
+        ).get("return", Any)
 
         # Using templates requires input_params
         if (
@@ -97,12 +132,6 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
             max_repair_attempts=max_repair_attempts,
         )
 
-        self._signature = self._define_signature()
-        self._schema = cast(JSON, self.signature.model_json_schema())
-        self.returns: Type[CallableReturnType] | None = get_type_hints(
-            self.__class__.__call__, self.__class__.__call__.__globals__
-        ).get("return")
-
         self.client = client
         self.model = model
         self.request_params = self._make_request_params(request_params)
@@ -125,7 +154,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
     def _create_tool_handler(
         self,
-        tools: list[CallableWithSignature | Tool] | None = None,
+        tools: list[CallableWithSchema | Tool] | None = None,
         auto_invoke: bool = False,
         max_repair_attempts: int = 2,
     ) -> ToolHandler | None:
@@ -138,44 +167,24 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
                 max_repair_attempts=max_repair_attempts,
             )
 
-    def _define_signature(self) -> Type[BaseModel]:
-        """Define the signature for the caller based on the input_params."""
-        if self.input_params:
-            fields = {}
-            for field_name, field_info in self.input_params.model_fields.items():
-                if field_info.description:
-                    fields[field_name] = (field_info.annotation, Field(..., description=field_info.description))
-                else:
-                    fields[field_name] = (field_info.annotation, ...)
-
-            return create_model(
-                to_snake_case(self.name),
-                __doc__=self.description,
-                **fields,
-                __config__={"arbitrary_types_allowed": True},
-            )
-
-        return create_model(
-            to_snake_case(self.name),
-            __doc__=self.description,
-            __config__={"arbitrary_types_allowed": True},
-        )
-
     @property
     def model(self) -> str:
-        """The model name identifier in the format 'provider:identifier'."""
+        """Get the model identifier in 'provider:name' format."""
         return self._model
 
     @model.setter
     def model(self, model: str):
         """Set and validate the model identifier.
 
-        Args:
-            value (str): Model identifier (e.g., 'openai:gpt-4' or 'anthropic:claude')
+        Parameters
+        ----------
+        model : str
+            Model identifier (e.g. 'openai:gpt-4')
 
         Raises
         ------
-            ValueError: If model string is invalid or missing provider prefix
+        ValueError
+            If model string is invalid or missing provider prefix
         """
         if not model or not isinstance(model, str):
             raise ValueError("Model must be a non-empty string")
@@ -184,16 +193,6 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
                 "Model must be in format 'provider:identifier' (e.g., 'openai:gpt-4o' or 'anthropic:claude-3-5-haiku-latest')"
             )
         self._model = model
-
-    @property
-    def signature(self) -> Type[BaseModel]:
-        """Get the Pydantic model for the template signature."""
-        return self._signature
-
-    @property
-    def schema(self) -> JSON:
-        """Get the OpenAPI-compatible schema."""
-        return self._schema
 
     @property
     def request_params(self) -> dict[str, JSON]:
@@ -222,7 +221,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
         return params
 
-    def _tools(self) -> list[CallableWithSignature] | None:
+    def _tools(self) -> list[CallableWithSchema] | None:
         """Extract tools from tool_handler if available."""
         if self.tool_handler:
             return list(self.tool_handler.validator.toolbox.values())
@@ -236,7 +235,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
             raise TypeError("Handler must use PydanticValidator for structured response handling.")
 
         # Hack function-calling for models that do not support structured outputs
-        tool = openai_pydantic_function_tool(self.response_handler.validator.model)
+        tool = openai_pydantic_function_tool(self.response_handler.validator.pydantic_model)
         configs = {
             "anthropic": {
                 "tools": [cast(JSON, tool)],
@@ -252,7 +251,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         """Generate provider-specific tool configuration parameters."""
         from openai import pydantic_function_tool as openai_pydantic_function_tool
 
-        tools = [openai_pydantic_function_tool(t.signature) for t in self._tools()]
+        tools = [openai_pydantic_function_tool(t.function_schema.pydantic_model) for t in self._tools()]
         tools = cast(JSON, tools)
 
         configs = {
@@ -339,6 +338,7 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
         return conversation
 
+    @override
     def __call__(
         self,
         *,
@@ -364,11 +364,13 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
         Returns
         -------
-            The processed response which may be of type CallableReturnType, BaseModel, or str.
+        CallableReturnType | BaseModel | str
+            The validated response from the LLM
 
         Raises
         ------
-            ValueError: If the conversation is empty or missing required 'system' or 'user' messages.
+        ValidationError
+            If response validation fails after all repair attempts
         """
         conversation = self.render(input=input, conversation_history=conversation_history, state=state)
 
