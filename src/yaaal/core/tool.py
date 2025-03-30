@@ -11,7 +11,7 @@ import inspect
 import json
 import logging
 import re
-from typing import Any, Callable, Generic, Literal, Type, TypeVar, cast, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Generic, Literal, Type, TypeVar, Union, cast, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from typing_extensions import override, runtime_checkable
@@ -20,7 +20,7 @@ from .base import CallableReturnType, CallableWithSchema
 from .exceptions import ValidationError
 from ..types_.base import JSON
 from ..types_.core import FunctionSchema, ToolResultMessage
-from ..types_.utils import get_union_args, is_type_annotation
+from ..types_.utils import coerce_to_type, get_union_args, is_instance_of_type, is_type_annotation, origin_is_union
 
 logger = logging.getLogger(__name__)
 
@@ -299,10 +299,10 @@ class Tool(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]):
         self.__doc__ = self.function_schema.pydantic_model.__doc__
 
     @override
-    def __call__(self, **kwargs: Any) -> CallableReturnType:
-        """Execute with validation."""
-        args, func_kwargs = self.function_schema.to_call_args(kwargs)
-        result = self._func(*args, **func_kwargs)
+    def __call__(self, *args: Any, **kwargs: Any) -> CallableReturnType:
+        """Execute function and validate result."""
+        # _args, _kwargs = self.function_schema.to_call_args(kwargs)
+        result = self._func(*args, **kwargs)
         return self.validate_return_type(result)
 
     def validate_return_type(self, value: Any) -> CallableReturnType:
@@ -310,28 +310,42 @@ class Tool(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]):
 
         Checks if the value matches the type specified in 'returns' and attempts to convert it for basic types
         or validate it for Pydantic models.
+
+
+        Parameters
+        ----------
+        value : Any
+            The value to validate/coerce
+        returns : Any
+            The target type to coerce to
+
+        Returns
+        -------
+        Any
+            The coerced value matching the target type
+
+        Raises
+        ------
+        TypeError
+            If coercion is not possible
         """
-        if self.returns in (None, Any):
+        # Early return if no return type specified
+        if self.returns is None or self.returns is Any:
+            return value
+        if not is_type_annotation(self.returns):
+            raise TypeError(f"Invalid return type annotation: {self.returns}")
+
+        # If value already matches the type, return it
+        if is_instance_of_type(value, self.returns):
             return value
 
-        if not is_type_annotation(self.returns):
-            raise TypeError(f"Return type hint {self.returns} is not a valid type")
-
-        return_types = get_union_args(self.returns)
-        for rt in return_types:
-            effective_type = get_origin(rt) or rt
-            if isinstance(value, effective_type):
-                return value
-            if effective_type in (str, int, float, bool):
-                # Coerce basic types.
-                return cast(CallableReturnType, rt(value))
-            elif issubclass(rt, BaseModel):
-                # Validate / coerce models.
-                return cast(CallableReturnType, rt.model_validate(value))
-
-        raise ValidationError(
-            f"Return value {value} of type {type(value)} does not match expected type {return_types}"
-        )
+        # Leverage coerce_to_type for conversion
+        try:
+            return coerce_to_type(value, self.returns)
+        except (ValueError, TypeError) as e:
+            raise TypeError(
+                f"Could not coerce {value!r} (of type {type(value).__name__}) to {self.returns}: {e}"
+            ) from e
 
     @staticmethod
     def respond_as_tool(tool_call_id: str, response: str | JSON) -> ToolResultMessage:

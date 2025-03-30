@@ -1,6 +1,7 @@
 from __future__ import annotations as _annotations
 
 import collections.abc
+from collections.abc import Collection, Mapping, Sequence
 from functools import lru_cache
 import logging
 import types
@@ -264,6 +265,100 @@ def _resolve_union_types(type1: Any, type2: Any) -> Any:
     args1 = get_union_args(type1)
     args2 = get_union_args(type2)
     return _resolve_union_types_direct(args1, args2)
+
+
+def _flatten_union(tp: Any) -> tuple[Any, ...]:
+    # Recursively unnest union types
+    args = get_union_args(tp)
+    flattened = []
+    for arg in args:
+        if origin_is_union(arg):
+            flattened.extend(_flatten_union(arg))
+        else:
+            flattened.append(arg)
+    return tuple(flattened)
+
+
+def is_instance_of_type(value: Any, annotation: Any) -> bool:
+    """Check if value matches the type annotation (supports Union types)."""
+    origin = get_origin(annotation)
+    if origin is Union:
+        return any(is_instance_of_type(value, arg) for arg in get_args(annotation))
+    elif origin is Annotated or origin is typing_extensions.Annotated:
+        inner_tp, _ = unpack_annotated(annotation)
+        return is_instance_of_type(value, inner_tp)
+    elif isinstance(annotation, type):
+        return isinstance(value, annotation)
+    return False
+
+
+def coerce_to_type(value: Any, target: Any) -> Any:
+    """Recursively coerce a value to the target type, handling generic collections.
+
+    Supports:
+    - Basic types (str, int, float, bool)
+    - Sequences (list, tuple)
+    - Sets (set, frozenset)
+    - Mappings (dict)
+    - Pydantic models
+    """
+    origin = get_origin(target)
+    if origin is None:
+        # Handle basic types and pydantic models
+        if isinstance(target, type):
+            if issubclass(target, BaseModel):
+                return target.model_validate(value)
+            try:
+                return target(value)
+            except Exception as e:
+                raise TypeError(f"Could not coerce {value!r} to {target}: {e}") from e
+        return value
+
+    args = get_args(target)
+
+    # Handle Optional/Union types
+    if origin_is_union(origin):
+        for arg in args:
+            # If already matching, return value
+            if is_instance_of_type(value, arg):
+                return value
+            try:
+                return coerce_to_type(value, arg)
+            except (ValueError, TypeError):
+                continue
+        raise TypeError(f"Could not coerce {value!r} to any of {args}")
+
+    # Handle collections
+    if isinstance(value, str) and origin not in (str, bytes):
+        raise TypeError(f"Cannot coerce string to {target}")
+
+    # Sequence types (list, tuple, etc)
+    if isinstance(origin, type) and issubclass(origin, (Sequence, collections.abc.Sequence)):
+        if not isinstance(value, (list, tuple)):
+            raise TypeError(f"Expected sequence for {target}, got {type(value)}")
+        elem_type = args[0] if args else Any
+        converted = [coerce_to_type(x, elem_type) for x in value]
+        return origin(converted)
+
+    # Set types
+    if isinstance(origin, type) and issubclass(origin, (set, frozenset)):
+        if not isinstance(value, (list, set, tuple)):
+            raise TypeError(f"Expected collection for {target}, got {type(value)}")
+        elem_type = args[0] if args else Any
+        return origin(coerce_to_type(x, elem_type) for x in value)
+
+    # Mapping types
+    if isinstance(origin, type) and issubclass(origin, (Mapping, collections.abc.Mapping)):
+        if not isinstance(value, dict):
+            raise TypeError(f"Expected mapping for {target}, got {type(value)}")
+        key_type, val_type = args if args else (Any, Any)
+        return origin((coerce_to_type(k, key_type), coerce_to_type(v, val_type)) for k, v in value.items())
+
+    # Fallback - try direct conversion
+    try:
+        return origin(value)
+    except (ValueError, TypeError) as e:
+        raise TypeError(f"Could not coerce {value!r} to {target}: {e}") from e
 
 
 # Type variable for BaseModel subclasses
