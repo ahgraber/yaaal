@@ -92,24 +92,6 @@ class Caller(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]
         self.name = to_snake_case(self.__class__.__name__)
         self.description = description
 
-        # Create function schema
-        self.function_schema = FunctionSchema(
-            pydantic_model=input_params
-            or create_model(
-                self.name,
-                __doc__=description,
-                input=(str, ...),
-            ),
-            json_schema=pydantic_to_schema(input_params) if input_params else {},
-            signature=inspect.signature(self.__call__),
-        )
-
-        # Set returns from type hints
-        self.returns = get_type_hints(
-            self.__class__.__call__,
-            self.__class__.__call__.__globals__,
-        ).get("return", Any)
-
         # Using templates requires input_params
         if (
             isinstance(instruction, (StringTemplate, JinjaTemplate))
@@ -118,8 +100,18 @@ class Caller(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]
             raise ValueError("Input parameter specification is required when templates are used.")
 
         self.instruction = instruction
-        self.input_template = input_template
-        self.input_params = input_params
+
+        # set defaults for when input_template and input_params are none
+        if input_template is None and input_params is None:
+            self.input_template = StringTemplate("$input")
+            self.input_params = create_model(
+                self.name,
+                __doc__=description,
+                input=(str, ...),
+            )
+        else:
+            self.input_template = input_template
+            self.input_params = input_params
 
         self.max_repair_attempts = max_repair_attempts
         self.tool_handler = self._create_tool_handler(
@@ -131,6 +123,24 @@ class Caller(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]
             output_validator=output_validator,
             max_repair_attempts=max_repair_attempts,
         )
+
+        # Create function schema
+        self.function_schema = FunctionSchema(
+            pydantic_model=input_params
+            or create_model(
+                self.name,
+                __doc__=description,
+                input=(str, ...),
+            ),
+            json_schema=pydantic_to_schema(self.input_params) if self.input_params else {},
+            signature=inspect.signature(self.__call__),
+        )
+
+        # Set returns from type hints
+        self.returns = get_type_hints(
+            self.__class__.__call__,
+            # self.__class__.__call__.__globals__,
+        ).get("return", Any)
 
         self.client = client
         self.model = model

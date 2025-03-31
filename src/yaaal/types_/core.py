@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from typing import Any, Literal, Self, Type, TypeAlias, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -147,6 +148,11 @@ class FunctionSchema:
         self.pydantic_model = pydantic_model
         self.json_schema = json_schema
         self.signature = signature
+
+    def __repr__(self) -> str:
+        """Return a string representation of the function schema."""
+        # return f"FunctionSchema(pydantic_model={self.pydantic_model}, json_schema={self.json_schema})"
+        return json.dumps(self.json_schema)
 
     def __call__(self, /, **data: Any):
         """Create a new model by parsing and validating input data from keyword arguments."""
