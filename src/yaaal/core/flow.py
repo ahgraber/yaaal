@@ -1,6 +1,6 @@
 """Components for composable LLM calls.
 
-Flows process a predefined series of steps (Caller | CallableWithSignature) before returning a final response.
+Flows process a predefined series of steps (Caller | CallableWithSchema) before returning a final response.
 
 A Flow must:
 - manage the in-Flow conversation
@@ -19,7 +19,7 @@ from typing import Match, Pattern, Type
 import json_repair
 from pydantic import BaseModel, Field
 
-from .base import CallableWithSignature
+from .base import CallableWithSchema
 from .exceptions import ValidationError
 from .handler import ResponseHandler, ToolHandler  # , CompositeHandler
 from .template import (

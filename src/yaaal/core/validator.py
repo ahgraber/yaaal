@@ -16,9 +16,9 @@ from typing import Pattern
 
 import json_repair
 from pydantic import BaseModel
-from typing_extensions import override, runtime_checkable
+from typing_extensions import override
 
-from .base import CallableWithSignature, Validator, ValidatorReturnType
+from .base import CallableWithSchema, Validator
 from .exceptions import ValidationError
 from .tool import Tool
 from ..types_.core import (
@@ -60,12 +60,12 @@ class PassthroughValidator(Validator[str]):
 
 
 class PydanticValidator(Validator[BaseModel]):
-    """A validator that uses a Pydantic model to parse and verify JSON responses.
+    """A validator that uses a Pydantic pydantic_model to parse and verify JSON responses.
 
     Attempts to fix common JSON formatting issues using a repair mechanism.
 
     Args:
-        model: A Pydantic model class defining the expected schema.
+        pydantic_model: A Pydantic pydantic_model class defining the expected schema.
 
     Examples
     --------
@@ -80,20 +80,20 @@ class PydanticValidator(Validator[BaseModel]):
 
     Raises
     ------
-        ValidationError: If the input fails to match the model schema.
+        ValidationError: If the input fails to match the pydantic_model schema.
     """
 
-    def __init__(self, model: type[BaseModel]):
-        """Initialize the Pydantic validation model.
+    def __init__(self, pydantic_model: type[BaseModel]):
+        """Initialize the Pydantic validation pydantic_model.
 
         Args:
-            model: Pydantic model class defining the schema.
+            pydantic_model: Pydantic pydantic_model class defining the schema.
         """
-        self.model = model
+        self.pydantic_model = pydantic_model
 
     @override
     def validate(self, completion: str) -> BaseModel:
-        return self.model.model_validate(json_repair.loads(completion))
+        return self.pydantic_model.model_validate(json_repair.loads(completion))
 
     @override
     def repair_instructions(self, completion: str, error: str) -> Conversation:
@@ -105,7 +105,7 @@ class PydanticValidator(Validator[BaseModel]):
                         f"""
                         Validation failed: {error}
                         Please update your response to conform to this schema:
-                        {json.dumps(self.model.model_json_schema())}
+                        {json.dumps(self.pydantic_model.model_json_schema())}
                         """.strip()
                     ),
                 ),
@@ -183,7 +183,7 @@ class ToolValidator(Validator[BaseModel]):
     >>> result = validator.validate(
     ...     ChatCompletionMessageToolCall(function=FunctionCall(name="add", arguments='{"a": 1, "b": 2}'))
     ... )
-    >>> isinstance(result, add.signature)
+    >>> isinstance(result, add.pydantic_model)
     True
 
     Raises
@@ -191,7 +191,7 @@ class ToolValidator(Validator[BaseModel]):
         ValidationError: If the tool name is not found or the arguments are invalid.
     """
 
-    def __init__(self, toolbox: list[CallableWithSignature | Tool]):
+    def __init__(self, toolbox: list[CallableWithSchema | Tool]):
         """Initialize the ToolValidator with a toolbox of callable tools.
 
         Args:
@@ -207,24 +207,24 @@ class ToolValidator(Validator[BaseModel]):
         self.toolbox = toolbox
 
     @property
-    def toolbox(self) -> dict[str, CallableWithSignature]:
+    def toolbox(self) -> dict[str, CallableWithSchema]:
         """Return the registered toolbox of tools."""
         return self._toolbox
 
     @toolbox.setter
-    def toolbox(self, toolbox: list[CallableWithSignature | Tool]):
+    def toolbox(self, toolbox: list[CallableWithSchema | Tool]):
         """Register tools by mapping their names to the callable."""
         tb = {}
         for tool in toolbox:
-            if not isinstance(tool, CallableWithSignature):
-                raise TypeError(f"Toolbox requires CallableWithSignature objects. Received {tool}: {type(tool)}")
+            if not isinstance(tool, CallableWithSchema):
+                raise TypeError(f"Toolbox requires CallableWithSchema objects. Received {tool}: {type(tool)}")
 
-            if not tool.signature.__doc__:
+            if not tool.function_schema.pydantic_model.__doc__:
                 logger.warning(
-                    f"Function {tool.signature.__name__} should have a docstring for proper signature export."
+                    f"Function {tool.function_schema.pydantic_model.__name__} should have a docstring for proper signature export."
                 )
             try:
-                tb[tool.signature.__name__] = tool
+                tb[tool.function_schema.pydantic_model.__name__] = tool
             except Exception:
                 logger.exception(f"Error while registering toolbox entry for {str(tool)}")
                 raise
@@ -239,7 +239,7 @@ class ToolValidator(Validator[BaseModel]):
 
         Returns
         -------
-            A Pydantic model instance representing the validated arguments.
+            A Pydantic pydantic_model instance representing the validated arguments.
 
         Raises
         ------
@@ -249,7 +249,7 @@ class ToolValidator(Validator[BaseModel]):
         arguments = completion.function.arguments
 
         try:
-            return self.toolbox[name].signature.model_validate(json_repair.loads(arguments))
+            return self.toolbox[name].function_schema.model_validate(json_repair.loads(arguments))
         except KeyError as e:
             raise ValidationError(f"Tool {name} does not exist in toolbox") from e
 
@@ -271,7 +271,7 @@ class ToolValidator(Validator[BaseModel]):
             f"""
             Validation failed: {error}
             Please update your response to conform to the following schema for function '{function.name}':
-            {json.dumps(self.toolbox[function.name].schema)}
+            {json.dumps(self.toolbox[function.name].function_schema.model_json_schema())}
             """.strip()
         )
         return Conversation(

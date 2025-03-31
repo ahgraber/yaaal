@@ -8,17 +8,6 @@ exclude: |
   )$
 
 repos:
-  - repo: local
-    hooks:
-      - id: forbid-yml
-        name: Forbid .yml file extensions (use .yaml)
-        entry: YAML file extensions must be .yaml
-        language: fail
-        files: \.yml$
-        exclude: |
-          (?x)^(
-            ^.*(copier-answers\.ya?ml)$
-          )$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v5.0.0"
     hooks:
@@ -59,18 +48,10 @@ repos:
       - id: fix-ligatures
         stages: [pre-commit]
   - repo: https://github.com/zricethezav/gitleaks
-    rev: "v8.23.1"
+    rev: "v8.24.2"
     hooks:
       - id: gitleaks
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: "v0.43.0"
-    hooks:
-      - id: markdownlint
-        name: Lint markdown files
-        args:
-          - --config=.markdownlint.yaml
-          - --fix
-        stages: [pre-commit]
+
   # ### NOTE: Prettier broke plugins:
   #           https://github.com/pre-commit/mirrors-prettier/blob/main/README.md
   # - repo: local
@@ -86,12 +67,40 @@ repos:
   #         # - "--ignore-path '**/*.md'"
   #         # - "--ignore-path '**/*.y*ml'"
   #       stages: [pre-commit]
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: "v0.44.0"
+    hooks:
+      - id: markdownlint
+        name: Lint markdown files
+        args:
+          - --config=.markdownlint.yaml
+          - --fix
+        stages: [pre-commit]
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: "v1.37.0"
+    hooks:
+      - id: yamllint
+        name: Lint yaml files
+        args: [-c=.yamllint.yaml]
+        stages: [pre-commit]
+  - repo: local
+    hooks:
+      - id: forbid-yml
+        name: Forbid .yml file extensions (use .yaml)
+        entry: YAML file extensions must be .yaml
+        language: fail
+        files: \.yml$
+        exclude: |
+          (?x)^(
+            ^.*(copier-answers\.ya?ml)$
+          )$
+
   - repo: https://github.com/tox-dev/pyproject-fmt
-    rev: "v2.5.0"
+    rev: "v2.5.1"
     hooks:
       - id: pyproject-fmt
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: "v0.9.2"
+    rev: "v0.11.2"
     hooks:
       - id: ruff
         name: Lint with Ruff
@@ -109,6 +118,7 @@ repos:
     hooks:
       - id: nbstripout
         stages: [pre-commit]
+
   - repo: https://github.com/koalaman/shellcheck-precommit # local
     rev: "v0.10.0"
     hooks:
@@ -120,7 +130,7 @@ repos:
         exclude: "^.*zsh$" # ignore '*.zsh" scripts'
         stages: [pre-commit]
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: "v3.10.0-2"
+    rev: "v3.11.0-1"
     hooks:
       - id: shfmt
         name: Format shell scripts
@@ -130,11 +140,12 @@ repos:
           - -ci
           - -bn
         stages: [pre-commit]
+
   ### NOTE: ".typos.toml" may be required to have _already been committed_
   ### in order for typos pre-commit hook to read it.
   ### In this case, comment out this block until ".typos.toml" has been committed successfully
   - repo: https://github.com/crate-ci/typos
-    rev: "v1.29.4"
+    rev: "v1.30.2"
     hooks:
       - id: typos
         name: Spellcheck with Typos
@@ -144,11 +155,4 @@ repos:
             ^.*(\.typos\.toml)$ |
             ^.*(\.git.*)$
           )$
-        stages: [pre-commit]
-  - repo: https://github.com/adrienverge/yamllint.git
-    rev: "v1.35.1"
-    hooks:
-      - id: yamllint
-        name: Lint yaml files
-        args: [-c=.yamllint.yaml]
         stages: [pre-commit]

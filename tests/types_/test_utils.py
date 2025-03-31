@@ -14,7 +14,9 @@ from yaaal.types_.utils import (
     _resolve_type_conflict,
     _resolve_union_types,
     _resolve_union_types_direct,
+    coerce_to_type,
     get_union_args,
+    is_instance_of_type,
     merge_models,
     origin_is_union,
 )
@@ -226,6 +228,96 @@ class TestOriginIsUnion:
         assert origin_is_union(get_origin(union_type))
         union_operator = int | str
         assert origin_is_union(get_origin(union_operator))
+
+
+class TestFlattenUnion:
+    def test_flatten_already_flat(self):
+        from yaaal.types_.utils import _flatten_union
+
+        tp = Union[int, str]
+        flattened = _flatten_union(tp)
+        assert set(flattened) == {int, str}
+
+    def test_flatten_nested_union(self):
+        from yaaal.types_.utils import _flatten_union
+
+        tp = Union[int, Union[str, float]]
+        flattened = _flatten_union(tp)
+        assert set(flattened) == {int, str, float}
+
+    def test_flatten_multiple_nested(self):
+        from yaaal.types_.utils import _flatten_union
+
+        tp = Union[Union[int, str], Union[float, Union[bool, int]]]
+        flattened = _flatten_union(tp)
+        assert set(flattened) == {int, str, float, bool}
+
+
+class TestIsInstanceOfType:
+    def test_basic_type(self):
+        # Check that the value matches the basic type
+        assert is_instance_of_type(5, int)
+        assert not is_instance_of_type("5", int)
+
+    def test_union_type(self):
+        # Check union type recognition
+        assert is_instance_of_type(5, Union[int, str])
+        assert is_instance_of_type("hello", Union[int, str])
+        assert not is_instance_of_type(3.14, Union[int, str])
+
+    def test_annotated_type(self):
+        # Annotated type should behave like its inner type
+        annotated_str = Annotated[str, "description"]
+        assert is_instance_of_type("test", annotated_str)
+        assert not is_instance_of_type(123, annotated_str)
+
+    def test_custom_class(self):
+        # Test with a custom class
+        class Custom:
+            pass
+
+        instance = Custom()
+        assert is_instance_of_type(instance, Custom)
+        assert not is_instance_of_type("not instance", Custom)
+
+
+class TestCoerceToType:
+    def test_basic_int_conversion(self):
+        # Coerce a string to an int
+        assert coerce_to_type("123", int) == 123
+
+    def test_basic_float_conversion(self):
+        # Coerce a string to a float
+        assert coerce_to_type("3.14", float) == 3.14
+
+    def test_sequence_conversion(self):
+        # Coerce a list of strings to a list of ints
+        value = ["1", "2", "3"]
+        result = coerce_to_type(value, list[int])
+        assert result == [1, 2, 3]
+
+    def test_mapping_conversion(self):
+        # Coerce a dict with string numbers to dict[str, int]
+        value = {"a": "1", "b": "2"}
+        result = coerce_to_type(value, dict[str, int])
+        assert result == {"a": 1, "b": 2}
+
+    def test_conversion_failure(self):
+        # Invalid conversion should raise a TypeError
+        with pytest.raises(TypeError):
+            coerce_to_type("abc", int)
+
+    def test_nested_mapping_conversion(self):
+        # Coerce dict with list of strings to dict[str, list[int]]
+        value = {"a": ["1", "2"], "b": ["3", "4"]}
+        result = coerce_to_type(value, dict[str, list[int]])
+        assert result == {"a": [1, 2], "b": [3, 4]}
+
+        value = {"a": ["1", "hello world"], "b": ["3", "4"]}
+        result = coerce_to_type(value, dict[str, list[int | str]])  # NOTE: order of annotation matters!!
+        assert result == {"a": [1, "hello world"], "b": [3, 4]}
+        with pytest.raises(TypeError):
+            coerce_to_type(value, dict[str, list[int]])
 
 
 class TestMergeModels:

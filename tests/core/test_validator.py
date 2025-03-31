@@ -5,7 +5,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 import pytest
 
-from yaaal.core.base import CallableWithSignature
+from yaaal.core.base import CallableWithSchema
 from yaaal.core.exceptions import ValidationError
 from yaaal.core.tool import tool
 from yaaal.core.validator import (
@@ -209,7 +209,7 @@ class TestToolValidator:
         repair = validator.repair_instructions(tool_call, "validation error")
         assert isinstance(repair, Conversation)
         assert len(repair.messages) == 2
-        assert json.dumps(sample_tool.signature.model_json_schema()) in repair.messages[1].content
+        assert json.dumps(sample_tool.function_schema.model_json_schema()) in repair.messages[1].content
 
     def test_validate_valid_call(self, sample_tool):
         validator = ToolValidator(toolbox=[sample_tool])
@@ -223,7 +223,7 @@ class TestToolValidator:
                 type="function",
             )
         )
-        assert isinstance(result, sample_tool.signature)
+        assert isinstance(result, sample_tool.function_schema.pydantic_model)
 
     def test_validate_invalid_tool(self, sample_tool):
         validator = ToolValidator([sample_tool])

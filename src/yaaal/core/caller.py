@@ -3,95 +3,198 @@
 A Caller is the basic structure that wraps all logic required for LLM call-and-response.
 
 A Caller executes LLM requests with enhanced response validation and automatic error recovery.
-It manages message construction via a ConversationTemplate, performs API calls with a specified client,
+It manages message rendering, performs API calls with a specified client,
 and validates responses using associated handlers (which may include tool execution).
-
-Use factory functions (create_chat_caller, create_structured_caller, create_tool_caller) to instantiate
-Callers with specific behaviors.
 """
 
 from __future__ import annotations
 
+import inspect
+import json
 import logging
-from typing import Any, Generic, Literal, Type, cast, get_type_hints
+from string import Template as StringTemplate
+from typing import Any, Generic, Literal, Pattern, Type, cast, get_type_hints
 
-from pydantic import BaseModel
+from jinja2 import StrictUndefined, Template as JinjaTemplate
+from pydantic import BaseModel, Field, create_model
 from typing_extensions import override, runtime_checkable
 
 from aisuite import Client
-from openai import pydantic_function_tool as openai_pydantic_function_tool
 
-from .base import CallableReturnType, CallableWithSignature
+from .base import CallableReturnType, CallableWithSchema
 from .exceptions import ValidationError
-from .handler import ResponseHandler, ToolHandler  # , CompositeHandler
-from .template import ConversationTemplate
-from .tool import Tool, anthropic_pydantic_function_tool
+from .handler import ResponseHandler, ToolHandler
+from .tool import Tool, function_schema, pydantic_to_schema
 from .validator import PassthroughValidator, PydanticValidator, RegexValidator, ToolValidator
 from ..types_.base import JSON
-from ..types_.core import Conversation, Message, UserMessage
+from ..types_.core import Conversation, FunctionSchema, SystemMessage, UserMessage
 from ..types_.openai_compat import ChatCompletion, convert_response
+from ..utilities import to_snake_case
 
 logger = logging.getLogger(__name__)
 
 
-class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnType]):
-    """Executes LLM requests with validation and automated error recovery.
+class Caller(Generic[CallableReturnType], CallableWithSchema[CallableReturnType]):
+    """Protocol for callables that provide validated LLM interactions.
 
-    Manages the full lifecycle of LLM interactions including:
-    - Constructing conversation messages from prompts
-    - Executing API requests and converting responses
-    - Validating responses using the provided handler
-    - Performing automatic repair attempts in case of validation errors
-    - Optionally invoking tools based on the response
-
-    Attributes
-    ----------
-        client (Client): OpenAI-compatible API client.
-        model (str): Identifier for the model (e.g., "gpt-4").
-        conversation_template (ConversationTemplate): Template to generate conversation messages.
-        handler (ResponseHandler | ToolHandler | CompositeHandler): Processes and validates responses.
-        request_params (dict[str, JSON]): Additional API request parameters.
-        max_repair_attempts (int): Maximum allowed repair iterations.
+    This class implements the CallableWithSchema protocol to provide a standard
+    interface for LLM operations. It manages the full lifecycle of LLM interactions
+    including prompt rendering, API calls, response validation, and error recovery.
     """
 
     def __init__(
         self,
         client: Client,
         model: str,
-        conversation_template: ConversationTemplate,
-        handler: ResponseHandler[CallableReturnType] | ToolHandler,
+        description: str,
+        instruction: StringTemplate | JinjaTemplate | str,
+        input_template: StringTemplate | JinjaTemplate | None = None,
+        input_params: Type[BaseModel] | None = None,
         request_params: dict[str, JSON] | None = None,
+        tools: list[CallableWithSchema] | None = None,
+        auto_invoke: bool = False,
+        output_validator: Type[BaseModel] | Pattern | None = None,
         max_repair_attempts: int = 2,
     ):
+        """Initialize a Caller with LLM configuration and validation settings.
+
+        Parameters
+        ----------
+        client : Client
+            OpenAI-compatible API client
+        model : str
+            Model identifier (e.g. 'openai:gpt-4')
+        description : str
+            Description of the caller's purpose
+        instruction : StringTemplate | JinjaTemplate | str
+            Template for system messages
+        input_template : StringTemplate | JinjaTemplate | None, optional
+            Template for user messages, by default None
+        input_params : Type[BaseModel] | None, optional
+            Input validation model, by default None
+        request_params : dict[str, JSON] | None, optional
+            Additional API parameters, by default None
+        tools : list[CallableWithSchema | Tool] | None, optional
+            Available tools for function calling, by default None
+        auto_invoke : bool, optional
+            Whether to auto-invoke tools, by default False
+        output_validator : Type[BaseModel] | Pattern | None, optional
+            Validator for responses, by default None
+        max_repair_attempts : int, optional
+            Maximum repair attempts, by default 2
+
+        Raises
+        ------
+        ValueError
+            If templates are used without input_params
+        """
+        # Initialize remaining attributes
+        self.name = to_snake_case(self.__class__.__name__)
+        self.description = description
+
+        # Using templates requires input_params
+        if (
+            isinstance(instruction, (StringTemplate, JinjaTemplate))
+            or isinstance(input_template, (StringTemplate, JinjaTemplate))
+        ) and not input_params:
+            raise ValueError("Input parameter specification is required when templates are used.")
+
+        self.instruction = instruction
+
+        # set defaults for when input_template and input_params are none
+        if input_template is None and input_params is None:
+            self.input_template = StringTemplate("$input")
+            self.input_params = create_model(
+                self.name,
+                __doc__=description,
+                input=(str, ...),
+            )
+        else:
+            self.input_template = input_template
+            self.input_params = input_params
+
+        self.max_repair_attempts = max_repair_attempts
+        self.tool_handler = self._create_tool_handler(
+            tools=tools,
+            auto_invoke=auto_invoke,
+            max_repair_attempts=max_repair_attempts,
+        )
+        self.response_handler = self._create_response_handler(
+            output_validator=output_validator,
+            max_repair_attempts=max_repair_attempts,
+        )
+
+        # Create function schema
+        self.function_schema = FunctionSchema(
+            pydantic_model=input_params
+            or create_model(
+                self.name,
+                __doc__=description,
+                input=(str, ...),
+            ),
+            json_schema=pydantic_to_schema(self.input_params) if self.input_params else {},
+            signature=inspect.signature(self.__call__),
+        )
+
+        # Set returns from type hints
+        self.returns = get_type_hints(
+            self.__class__.__call__,
+            # self.__class__.__call__.__globals__,
+        ).get("return", Any)
+
         self.client = client
         self.model = model
-        self.conversation_template = conversation_template
-        self.handler = handler
-        self.max_repair_attempts = max_repair_attempts
-
-        self.signature = self.conversation_template.signature
-        self.schema = self.signature.model_json_schema()
-        self.returns: Type[CallableReturnType] | None = get_type_hints(
-            self.__class__.__call__, self.__class__.__call__.__globals__
-        ).get("return")
-
         self.request_params = self._make_request_params(request_params)
+
+    def _create_response_handler(
+        self, output_validator: Type[BaseModel] | Pattern | None = None, max_repair_attempts: int = 2
+    ) -> ResponseHandler:
+        """Create the appropriate handler based on the output_validator type."""
+        if output_validator is None:
+            return ResponseHandler(PassthroughValidator(), max_repair_attempts=max_repair_attempts)
+
+        elif isinstance(output_validator, type) and issubclass(output_validator, BaseModel):
+            return ResponseHandler(PydanticValidator(output_validator), max_repair_attempts=max_repair_attempts)
+
+        elif isinstance(output_validator, Pattern):
+            return ResponseHandler(RegexValidator(output_validator), max_repair_attempts=max_repair_attempts)
+
+        else:
+            raise ValueError(f"Unsupported output_validator type: {type(output_validator)}")
+
+    def _create_tool_handler(
+        self,
+        tools: list[CallableWithSchema | Tool] | None = None,
+        auto_invoke: bool = False,
+        max_repair_attempts: int = 2,
+    ) -> ToolHandler | None:
+        if tools is None:
+            return None
+        else:
+            return ToolHandler(
+                validator=ToolValidator(toolbox=tools),
+                auto_invoke=auto_invoke,
+                max_repair_attempts=max_repair_attempts,
+            )
 
     @property
     def model(self) -> str:
-        """The model name identifier in the format 'provider:identifier'."""
+        """Get the model identifier in 'provider:name' format."""
         return self._model
 
     @model.setter
     def model(self, model: str):
         """Set and validate the model identifier.
 
-        Args:
-            value (str): Model identifier (e.g., 'openai:gpt-4' or 'anthropic:claude')
+        Parameters
+        ----------
+        model : str
+            Model identifier (e.g. 'openai:gpt-4')
 
         Raises
         ------
-            ValueError: If model string is invalid or missing provider prefix
+        ValueError
+            If model string is invalid or missing provider prefix
         """
         if not model or not isinstance(model, str):
             raise ValueError("Model must be a non-empty string")
@@ -103,7 +206,6 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
 
     @property
     def request_params(self) -> dict[str, JSON]:
-        """Request parameters used for every execution."""
         """Request parameters used for every execution."""
         return self._request_params
 
@@ -117,31 +219,33 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         if "model" in params:
             raise ValueError("'model' should be set separately")
 
+        # TODO: what if both pydantic validator and tool handler?
+
         # Add structured format if using PydanticValidator
-        if isinstance(self.handler, ResponseHandler) and isinstance(self.handler.validator, PydanticValidator):
+        if isinstance(self.response_handler.validator, PydanticValidator):
             params |= self._make_structured_params()
 
         # Add tool configuration if using ToolHandler
-        if toolbox := self._get_toolbox():
-            params |= self._make_tool_params(toolbox)
+        if self.tool_handler:
+            params |= self._make_tool_params()
 
         return params
 
-    def _get_toolbox(self) -> list[CallableWithSignature] | None:
-        """Extract toolbox from handler if available."""
-        if isinstance(self.handler, ToolHandler):
-            return list(self.handler.validator.toolbox.values())
-        # if isinstance(self.handler, CompositeHandler) and isinstance(self.handler.tool_handler, ToolHandler):
-        #     return list(self.handler.tool_handler.validator.toolbox.values())
+    def _tools(self) -> list[CallableWithSchema] | None:
+        """Extract tools from tool_handler if available."""
+        if self.tool_handler:
+            return list(self.tool_handler.validator.toolbox.values())
         return None
 
     def _make_structured_params(self) -> dict[str, JSON]:
         """Generate provider-specific structured response parameters."""
-        if not isinstance(self.handler.validator, PydanticValidator):
+        from openai import pydantic_function_tool as openai_pydantic_function_tool
+
+        if not isinstance(self.response_handler.validator, PydanticValidator):
             raise TypeError("Handler must use PydanticValidator for structured response handling.")
 
         # Hack function-calling for models that do not support structured outputs
-        tool = openai_pydantic_function_tool(self.handler.validator.model)
+        tool = openai_pydantic_function_tool(self.response_handler.validator.pydantic_model)
         configs = {
             "anthropic": {
                 "tools": [cast(JSON, tool)],
@@ -153,9 +257,11 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         provider = self.model.split(":")[0]
         return configs.get(provider, configs["openai"])
 
-    def _make_tool_params(self, toolbox: list[CallableWithSignature]) -> dict[str, JSON]:
+    def _make_tool_params(self) -> dict[str, JSON]:
         """Generate provider-specific tool configuration parameters."""
-        tools = [openai_pydantic_function_tool(t.signature) for t in toolbox]
+        from openai import pydantic_function_tool as openai_pydantic_function_tool
+
+        tools = [openai_pydantic_function_tool(t.function_schema.pydantic_model) for t in self._tools()]
         tools = cast(JSON, tools)
 
         configs = {
@@ -166,11 +272,89 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         provider = self.model.split(":")[0]
         return configs.get(provider, configs["openai"])
 
+    def render(
+        self,
+        input: str,  # NOQA: A002
+        conversation_history: Conversation | None = None,
+        state: dict[str, Any] | None = None,
+    ) -> Conversation:
+        """Render a complete Conversation using the provided variables.
+
+        Parameters
+        ----------
+        input : str
+            Input string to be processed by the LLM.
+        conversation_history : Conversation | None, optional
+            Existing conversation history to append to, by default None
+        state : dict[str, Any], optional
+            Additional state variables that can be used in rendering, by default None
+
+        Returns
+        -------
+        Conversation
+            A Conversation object with rendered messages.
+        """
+        state_vars = {} if state is None else state.copy()
+
+        # Validate input if validator is provided
+        if self.input_params:
+            _ = self.input_params(input=input, **state_vars)
+
+        messages = []
+
+        # Add system message with instruction
+        if isinstance(self.instruction, str):
+            instruction_content = self.instruction
+        elif isinstance(self.instruction, StringTemplate):
+            instruction_content = self.instruction.substitute(input=input, **state_vars)
+        elif isinstance(self.instruction, JinjaTemplate):
+            instruction_content = self.instruction.render(input=input, **state_vars)
+        else:
+            raise TypeError(f"Unsupported instruction type: {type(self.instruction)}")
+
+        messages.append(SystemMessage(content=instruction_content))
+
+        # Add user message with template if provided
+        if self.input_template is None:
+            messages.append(UserMessage(content=input))
+        else:
+            if isinstance(self.input_template, StringTemplate):
+                input_content = self.input_template.substitute(input=input, **state_vars)
+            elif isinstance(self.input_template, JinjaTemplate):
+                input_content = self.input_template.render(input=input, **state_vars)
+            else:
+                raise TypeError(f"Unsupported template type: {type(self.input_template)}")
+
+            messages.append(UserMessage(content=input_content))
+
+        if conversation_history:
+            conversation = Conversation(
+                messages=[
+                    *conversation_history.messages,
+                    *messages,
+                ]
+            )
+        else:
+            conversation = Conversation(messages=messages)
+
+        if not conversation:
+            raise ValueError("Rendered empty Conversation.")
+
+        if not any(message.role == "system" for message in conversation.messages):
+            raise ValueError("Conversation must have at least one 'system' message.")
+
+        if not any(message.role == "user" for message in conversation.messages):
+            raise ValueError("Conversation must have at least one 'user' message.")
+
+        return conversation
+
+    @override
     def __call__(
         self,
         *,
+        input: str,  # NOQA: A002
         conversation_history: Conversation | None = None,
-        **template_vars: dict[str, Any],
+        state: dict[str, Any] | None = None,
     ) -> CallableReturnType | BaseModel | str:
         """Execute the LLM API call with conversation rendering and validation.
 
@@ -179,33 +363,29 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         It then sends the conversation to the LLM endpoint and processes the response via the handler,
         including repair attempts if validation fails.
 
+        Parameters
+        ----------
+        input : str
+            Input string to be processed by the LLM.
+        conversation_history : Conversation | None, optional
+            Existing conversation history to append to, by default None
+        state : dict[str, Any], optional
+            Additional state variables that can be used in rendering, by default None
+
         Returns
         -------
-            The processed response which may be of type CallableReturnType, BaseModel, or str.
+        CallableReturnType | BaseModel | str
+            The validated response from the LLM
 
         Raises
         ------
-            ValueError: If the conversation is empty or missing required 'system' or 'user' messages.
+        ValidationError
+            If response validation fails after all repair attempts
         """
-        # Render the conversation using the ConversationTemplate
-        rendered = self.conversation_template.render(template_vars)
+        conversation = self.render(input=input, conversation_history=conversation_history, state=state)
 
-        if conversation_history:
-            conversation_history.messages.extend(rendered.messages)
-        else:
-            conversation_history = rendered
-
-        if not conversation_history:
-            raise ValueError("Conversation cannot be empty.")
-
-        if not any(message.role == "system" for message in conversation_history.messages):
-            raise ValueError("Conversation must have at least one 'system' message.")
-
-        if not any(message.role == "user" for message in conversation_history.messages):
-            raise ValueError("Conversation must have at least one 'user' message.")
-
-        response = self._chat_completions_create(conversation_history)
-        return self._handle_with_repair(conversation=conversation_history, response=response)
+        response = self._chat_completions_create(conversation)
+        return self._handle_with_repair(conversation=conversation, response=response)
 
     def _chat_completions_create(self, conversation: Conversation) -> ChatCompletion:
         """Call the LLM chat endpoint and convert its response.
@@ -246,15 +426,23 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
         ------
             ValidationError: If the maximum repair attempts are exceeded or no repair instructions are available.
         """
+        target_handler = "tool" if self.tool_handler and response.choices[0].message.tool_calls else "response"
         try:
-            return self.handler.process(response)
+            if target_handler == "tool":
+                return self.tool_handler.process(response)
+            else:
+                return self.response_handler.process(response)
+
         except Exception as e:
             if repair_attempt >= self.max_repair_attempts:
                 raise ValidationError("Max repair attempts reached") from e
 
             logger.debug(f"Repair {repair_attempt} after error handling response {e}")
             msg = response.choices[0].message
-            repair_prompt = self.handler.repair(msg, str(e))
+            if target_handler == "tool":
+                repair_prompt = self.tool_handler.repair(msg, str(e))
+            else:
+                repair_prompt = self.response_handler.repair(msg, str(e))
 
             if not repair_prompt:
                 raise ValidationError("No repair instructions available") from e
@@ -262,86 +450,3 @@ class Caller(Generic[CallableReturnType], CallableWithSignature[CallableReturnTy
             conversation.messages.extend(repair_prompt.messages)
             new_response = self._chat_completions_create(conversation)
             return self._handle_with_repair(conversation, new_response, repair_attempt + 1)
-
-
-# Factory functions
-def create_chat_caller(
-    client: Client,
-    model: str,
-    conversation_template: ConversationTemplate,
-    request_params: dict[str, JSON] | None = None,
-) -> Caller:
-    """Create a basic Caller for chat without extra response validation.
-
-    Uses a passthrough validator to simply return the LLM response content.
-
-    Returns
-    -------
-        Caller: Configured for basic chat interactions.
-
-    Raises
-    ------
-        ValueError: If model or template is invalid
-    """
-    handler = ResponseHandler(PassthroughValidator())
-    return Caller(client, model, conversation_template, handler, request_params)
-
-
-def create_structured_caller(
-    client: Client,
-    model: str,
-    conversation_template: ConversationTemplate,
-    response_model: Type[BaseModel],
-    request_params: dict[str, JSON] | None = None,
-) -> Caller:
-    """Create a Caller for structured responses with validation via a Pydantic model.
-
-    The response is validated and converted to the provided Pydantic model.
-
-    Returns
-    -------
-        Caller: Configured for structured output.
-
-    Raises
-    ------
-        ValueError: If model, template or response_model is invalid
-    """
-    if not response_model or not issubclass(response_model, BaseModel):
-        raise ValueError("Response model must be a Pydantic model class")
-
-    handler = ResponseHandler(PydanticValidator(response_model))
-    return Caller(client, model, conversation_template, handler, request_params)
-
-
-def create_tool_caller(
-    client: Client,
-    model: str,
-    conversation_template: ConversationTemplate,
-    toolbox: list[CallableWithSignature | Tool],
-    request_params: dict[str, JSON] | None = None,
-    auto_invoke: bool = False,
-) -> Caller:
-    """Create a Caller configured for tool invocation.
-
-    Attaches a ToolHandler to allow optional execution of tools based on LLM response.
-
-    Returns
-    -------
-        Caller: Configured for tool-using interactions.
-
-    Raises
-    ------
-        ValueError: If model, template or toolbox is invalid
-    """
-    if not toolbox:
-        raise ValueError("Toolbox cannot be empty")
-
-    # Validate all tools have proper signatures
-    for tool in toolbox:
-        if not isinstance(tool, CallableWithSignature):
-            raise TypeError(f"Tool {tool} must implement CallableWithSignature")
-        if not tool.signature.__doc__:
-            logger.warning(f"Tool {tool.signature.__name__} missing docstring - this may affect LLM usage")
-
-    handler = ToolHandler(ToolValidator(toolbox), auto_invoke)
-    return Caller(client, model, conversation_template, handler, request_params)

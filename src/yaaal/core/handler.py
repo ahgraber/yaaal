@@ -1,9 +1,8 @@
 """Components for composable LLM calls.
 
 Handlers process LLM responses by validating and optionally repairing them.
-They distinguish between content messages and tool call messages, invoking the appropriate validation logic.
 This module provides:
-- ResponseHandler: For handling plain text responses.
+- ResponseHandler: For validating plaintext responses.
 - ToolHandler: For processing tool calls with validation and optional function execution.
 """
 
@@ -16,9 +15,15 @@ from typing import Generic
 from pydantic import BaseModel
 from typing_extensions import override, runtime_checkable
 
-from .base import ContentHandlerReturnType, Handler, ToolHandlerReturnType, Validator, ValidatorReturnType
+from .base import (
+    CallableWithSchema,
+    ContentHandlerReturnType,
+    Handler,
+    ToolHandlerReturnType,
+    Validator,
+    ValidatorReturnType,
+)
 from .exceptions import ResponseError
-from .tool import CallableWithSignature
 from .validator import PassthroughValidator, ToolValidator
 from ..types_.base import JSON
 from ..types_.core import AssistantMessage, Conversation, UserMessage
@@ -161,8 +166,7 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
                 return self._invoke(function, validated)
 
         elif msg.content:
-            # NOTE: Current assumption is that non-tool-calls are chat responses that do not need validation
-            # TODO: Revisit this assumption
+            logger.warning("ToolHandler handled 'message.content' instead of tool call. This should not happen.")
             return msg.content
 
         else:
@@ -178,10 +182,10 @@ class ToolHandler(Generic[ToolHandlerReturnType], Handler[None, ToolHandlerRetur
         params : BaseModel
             The validated parameters to pass to the tool
         """
-        tool = self.validator.toolbox[function.name]
+        fn = self.validator.toolbox[function.name]
 
         logger.debug(f"Invoking {function.name} with params: {params}")
-        result = tool(**params.model_dump())
+        result = fn(**params.model_dump())
         if isinstance(result, BaseModel):
             # !!!NOTE!!!
             # pydantic_model.model_dump_json() != json.dumps(pydantic_model.model_dump())
