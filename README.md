@@ -15,7 +15,8 @@ YAAAL (Yet Another AI Agent Library) is a highly composable and lightweight fram
 It aims to offer developers a simple yet flexible toolkit for creating autonomous systems that can interact with various environments, make decisions, and perform tasks in a modular manner ([more](docs/design_document.md)).
 
 > [!WARNING]  
-> `yaaal` is under active development and should not be considered for production use!
+> `yaaal` is an educational experiment and should not be considered for production use!
+> At this time, it is unlikely that `yaaal` will recieve further significant updates.
 
 ## Quickstart
 
